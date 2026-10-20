@@ -1,0 +1,10 @@
+build/
+results/*.jsonl
+results/*.csv
+*.out
+*.err
+*.sif
+__pycache__/
+*.pyc
+.DS_Store
+compile_commands.json
