@@ -146,5 +146,7 @@ int main(int argc, char** argv) {
         std::cout << "  Saved  →  results/experiments.jsonl\n\n";
     }
 
-    return stats.verified ? 0 : 1;
+    // Exit 1 only if verification was explicitly run and failed.
+    // Skipped verification (--no-verify) is not a failure.
+    return (args.verify && !stats.verified) ? 1 : 0;
 }
