@@ -22,11 +22,12 @@
 
 set -euo pipefail
 
-module load cuda/12.5
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# SLURM_SUBMIT_DIR is set by SLURM to the directory where sbatch was invoked
+REPO_ROOT="${SLURM_SUBMIT_DIR}"
 BUILD_DIR="${REPO_ROOT}/build"
 BENCH="${BUILD_DIR}/bench"
+
+module load cuda/12.1
 
 echo "=== Environment ==="
 srun hostname

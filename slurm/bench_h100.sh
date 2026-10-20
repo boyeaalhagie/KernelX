@@ -22,14 +22,12 @@
 
 set -euo pipefail
 
-# Load CUDA toolkit — must match the target architecture (H100 = sm_90 → CUDA 12+)
-module load cuda/12.5
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="${SLURM_SUBMIT_DIR}"
 BUILD_DIR="${REPO_ROOT}/build"
 BENCH="${BUILD_DIR}/bench"
 
-# ── Build ─────────────────────────────────────────────────────────────────────
+module load cuda/12.1
+
 echo "=== Environment ==="
 srun hostname
 srun nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
@@ -44,7 +42,6 @@ make -j"$(nproc)"
 cd "${REPO_ROOT}"
 echo ""
 
-# ── GEMM sweep ────────────────────────────────────────────────────────────────
 echo "=== GEMM Benchmarks (H100) ==="
 
 SIZES=(512 1024 2048 4096)
