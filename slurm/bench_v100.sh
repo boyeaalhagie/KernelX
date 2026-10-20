@@ -2,6 +2,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # KernelX — ROSIE V100 benchmark job
 #
+# NOTE: The dgx1 nodes (V100) currently run CUDA 10.1 and CMake 3.16.3, which
+# are below the project's minimum requirements (CUDA 11+, CMake 3.18+).
+# A Singularity container with a modern toolchain is required.
+#
+# TODO: build a container image with CUDA 12.x + CMake 3.28 and update this
+# script to use:
+#   singularity exec --nv -B /data:/data <image.sif> ./build.sh
+#
 # Submit:   sbatch slurm/bench_v100.sh
 # Monitor:  squeue -u boyea@ad.msoe.edu
 # Output:   tail -f job_<JOBID>.out
@@ -19,10 +27,6 @@
 set -euo pipefail
 
 REPO_ROOT="${SLURM_SUBMIT_DIR}"
-BUILD_DIR="${REPO_ROOT}/build"
-BENCH="${BUILD_DIR}/bench"
-
-module load cuda/12.1
 
 echo "=== Environment ==="
 srun hostname
@@ -30,36 +34,13 @@ srun nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,nohead
 date
 echo ""
 
-echo "=== Build ==="
-mkdir -p "${BUILD_DIR}"
-cd "${BUILD_DIR}"
-cmake "${REPO_ROOT}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=70
-make -j"$(nproc)"
-cd "${REPO_ROOT}"
+echo "=== Toolchain check ==="
+cmake --version
+nvcc --version 2>/dev/null || echo "nvcc: not found"
 echo ""
 
-echo "=== GEMM Benchmarks (V100) ==="
-
-SIZES=(512 1024 2048 4096)
-IMPLS=(cuda_naive cuda_tiled)
-WARMUP=20
-ITERS=100
-
-for SIZE in "${SIZES[@]}"; do
-    for IMPL in "${IMPLS[@]}"; do
-        echo "--- GEMM ${IMPL}  M=N=K=${SIZE} ---"
-        srun "${BENCH}" \
-            --workload gemm \
-            --implementation "${IMPL}" \
-            --m "${SIZE}" --n "${SIZE}" --k "${SIZE}" \
-            --dtype fp32 \
-            --warmup "${WARMUP}" \
-            --iterations "${ITERS}" \
-            --no-verify
-    done
-done
-
-echo ""
-echo "=== Done ==="
-date
-echo "Results written to ${REPO_ROOT}/results/experiments.jsonl"
+echo "ERROR: V100 nodes require CUDA 11+ and CMake 3.18+."
+echo "Current node has CUDA 10.1 and CMake 3.16.3."
+echo "Rebuild this script to use a Singularity container."
+echo "See slurm/bench_v100.sh for details."
+exit 1

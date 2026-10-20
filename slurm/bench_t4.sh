@@ -27,7 +27,7 @@ REPO_ROOT="${SLURM_SUBMIT_DIR}"
 BUILD_DIR="${REPO_ROOT}/build"
 BENCH="${BUILD_DIR}/bench"
 
-module load cuda/12.1
+module load cuda/12.9
 
 echo "=== Environment ==="
 srun hostname
