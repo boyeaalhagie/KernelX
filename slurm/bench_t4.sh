@@ -47,7 +47,7 @@ echo "=== GEMM Benchmarks (T4) ==="
 
 # Smaller sizes for T4 — 4096³ at low bandwidth will take a while
 SIZES=(512 1024 2048)
-IMPLS=(cuda_naive cuda_tiled)
+IMPLS=(cuda_naive cuda_tiled cuda_tuned)
 WARMUP=10
 ITERS=50
 

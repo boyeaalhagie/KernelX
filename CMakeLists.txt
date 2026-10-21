@@ -34,6 +34,7 @@ set(KERNELX_SOURCES
     src/workloads/gemm/impl/cpu_reference.cpp
     src/workloads/gemm/impl/cuda_naive.cu
     src/workloads/gemm/impl/cuda_tiled.cu
+    src/workloads/gemm/impl/cuda_tuned.cu
 )
 
 add_executable(bench ${KERNELX_SOURCES})

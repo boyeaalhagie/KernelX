@@ -54,7 +54,7 @@ The four project layers map directly to this structure:
 | GEMM | `cpu_reference` | ✓ | Correctness baseline; ikj loop order |
 | GEMM | `cuda_naive` | ✓ | V1: one thread per element, global memory only |
 | GEMM | `cuda_tiled` | ✓ | V2: shared-memory tiling, TILE=32 |
-| GEMM | `cuda_tuned` | Planned | V3: register blocking, occupancy tuning |
+| GEMM | `cuda_tuned` | ✓ | V3: register blocking, BM=BN=64 BK=8 TM=TN=4 |
 | GEMM | `cutlass` | Planned | V4: CUTLASS GEMM primitives |
 | GEMM | `triton` | Planned | V5: Triton kernel, comparison vs CUDA |
 | Softmax | `cpu_reference` | Planned | Numerically stable (online algorithm) |

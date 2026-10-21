@@ -3,6 +3,7 @@
 #include "workloads/gemm/impl/cpu_reference.hpp"
 #include "workloads/gemm/impl/cuda_naive.hpp"
 #include "workloads/gemm/impl/cuda_tiled.hpp"
+#include "workloads/gemm/impl/cuda_tuned.hpp"
 #include "workloads/workload.hpp"
 
 #include <iostream>
@@ -44,7 +45,8 @@ static void print_usage(const char* prog) {
         "Available workloads / implementations:\n"
         "  gemm / cpu_reference\n"
         "  gemm / cuda_naive\n"
-        "  gemm / cuda_tiled\n\n"
+        "  gemm / cuda_tiled\n"
+        "  gemm / cuda_tuned\n\n"
         "Example:\n"
         "  ./bench --workload gemm --implementation cuda_naive \\\n"
         "          --m 4096 --n 4096 --k 4096 --dtype fp32   \\\n"
@@ -89,6 +91,7 @@ static std::unique_ptr<kernelx::Workload> make_workload(
         if (impl == "cpu_reference") return std::make_unique<kernelx::GemmCpuReference>();
         if (impl == "cuda_naive")    return std::make_unique<kernelx::GemmCudaNaive>();
         if (impl == "cuda_tiled")    return std::make_unique<kernelx::GemmCudaTiled>();
+        if (impl == "cuda_tuned")    return std::make_unique<kernelx::GemmCudaTuned>();
         throw std::invalid_argument("unknown GEMM implementation: '" + impl + "'");
     }
     throw std::invalid_argument("unknown workload: '" + workload + "'");
