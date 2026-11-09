@@ -74,8 +74,8 @@ done
 echo ""
 echo "=== GEMM Benchmarks — Triton V5 (T4) ==="
 VENV="${REPO_ROOT}/.venv_triton"
-if [ ! -d "${VENV}" ]; then
-    echo "  Creating Triton venv at ${VENV} ..."
+if [ ! -f "${VENV}/bin/python3" ] || ! "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+    echo "  Setting up Triton venv at ${VENV} ..."
     python3 -m venv --system-site-packages "${VENV}"
     "${VENV}/bin/pip" install --quiet \
         triton \

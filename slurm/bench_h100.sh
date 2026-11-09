@@ -74,8 +74,10 @@ echo "=== GEMM Benchmarks — Triton V5 (H100) ==="
 # Triton needs PyTorch.  Set up a venv on first run; reuse on subsequent runs.
 # --system-site-packages picks up any cluster-wide torch/triton if present.
 VENV="${REPO_ROOT}/.venv_triton"
-if [ ! -d "${VENV}" ]; then
-    echo "  Creating Triton venv at ${VENV} ..."
+# Check importability rather than directory existence — handles the case where
+# the venv was set up by a T4 job (which has internet access) and we just reuse it.
+if [ ! -f "${VENV}/bin/python3" ] || ! "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+    echo "  Setting up Triton venv at ${VENV} ..."
     python3 -m venv --system-site-packages "${VENV}"
     # cu121 wheel is compatible with CUDA 12.x runtime
     "${VENV}/bin/pip" install --quiet \
