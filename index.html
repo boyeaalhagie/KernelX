@@ -695,6 +695,34 @@
       <p style="font-size: 13px; margin-top: 8px;">
         Every claim about performance is backed by a timing measurement. Every optimization decision is motivated by a profiler observation, not intuition.
       </p>
+
+      <h3 style="margin-top: 40px; margin-bottom: 12px;">Every Implementation Is a Falsifiable Hypothesis</h3>
+      <p style="font-size: 13px;">
+        The loop only produces insight if each step makes a specific, testable claim about what the bottleneck is. When the measurement contradicts the hypothesis, that is a result — not a failure.
+      </p>
+      <div class="table-wrap" style="margin-top: 16px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Hypothesis</th>
+              <th>Implementation</th>
+              <th>Result</th>
+              <th>What it confirmed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Global memory reuse is the bottleneck</td><td>cuda_tiled</td><td style="color: var(--green);">✓ 1.7×</td><td>Shared memory tiling reduced HBM traffic</td></tr>
+            <tr><td>Register pressure limits compute density</td><td>cuda_tuned</td><td style="color: var(--green);">✓ 4.1×</td><td>8×8 accumulator pushed AI above ridge point</td></tr>
+            <tr><td>CUDA cores are the compute ceiling</td><td>cuda_cutlass</td><td style="color: var(--green);">✓ 32.6×</td><td>TF32 Tensor Cores are a different execution unit</td></tr>
+            <tr><td>Materializing N×N attention in HBM is the bottleneck</td><td>cuda_flash</td><td style="color: var(--green);">✓ 8.5×</td><td>Eliminating the scratch buffer removed the dominant cost</td></tr>
+            <tr><td>FP16 halves memory traffic, so it must be faster</td><td>cuda_flash_fp16</td><td style="color: var(--red);">✗ −3%</td><td>Kernel is compute-bound — the memory roof is irrelevant here</td></tr>
+            <tr><td>Synchronization cost dominates softmax, not arithmetic</td><td>cuda_online</td><td style="color: var(--green);">✓ 300×</td><td>Warp-per-row with __shfl eliminated the global broadcast</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size: 12px; color: var(--muted); margin-top: 8px;">
+        The FP16 result is the most important row. A wrong hypothesis that is measured and explained is better engineering than a right guess with no analysis.
+      </p>
     </section>
 
     <!-- GEMM -->
@@ -733,23 +761,38 @@
       <div class="insight-cards">
         <div class="insight-card">
           <span class="badge">naive</span>
-          <p>O(2N) global loads per output element. Every thread reads full rows and columns independently with no data reuse. L2 miss-dominated — most cycles stall waiting on HBM.</p>
+          <div>
+            <p style="margin-bottom: 6px;">O(2N) global loads per output element. Every thread reads full rows and columns independently with no data reuse. L2 miss-dominated — most cycles stall waiting on HBM.</p>
+            <p style="font-size: 12px; color: var(--red); margin: 0;"><strong>Roofline:</strong> memory-bound — AI ≈ 1 FLOP/byte vs H100 ridge 17.9 FLOP/byte. Bottleneck is global memory, not compute.</p>
+          </div>
         </div>
         <div class="insight-card">
           <span class="badge">tiled</span>
-          <p>Shared memory tiling with 32×32 blocks. Global traffic drops to O(2N/tile) — threads in the same block cooperatively load a tile once and reuse it T times. 1.7× speedup.</p>
+          <div>
+            <p style="margin-bottom: 6px;">Shared memory tiling with 32×32 blocks. Global traffic drops to O(2N/tile) — threads in the same block cooperatively load a tile once and reuse it 32 times. 1.7× speedup.</p>
+            <p style="font-size: 12px; color: var(--orange); margin: 0;"><strong>Roofline:</strong> still memory-bound — AI improves to ≈ tile/2 FLOP/byte but register pressure limits tile size to 32.</p>
+          </div>
         </div>
         <div class="insight-card">
           <span class="badge">tuned</span>
-          <p>Register-blocked accumulator (8×8 per thread), <code>float4</code> vectorized loads, fully unrolled inner loop. Kernel is now compute-bound above the ridge point. 4.1× speedup.</p>
+          <div>
+            <p style="margin-bottom: 6px;">Register-blocked accumulator (8×8 per thread), <code>float4</code> vectorized loads, fully unrolled inner loop. 4.1× speedup.</p>
+            <p style="font-size: 12px; color: var(--green); margin: 0;"><strong>Roofline:</strong> <em>compute-bound</em> — AI crosses the ridge point. FP32 FMA utilisation ≈ 35–40% of peak. Memory is no longer the ceiling.</p>
+          </div>
         </div>
         <div class="insight-card">
           <span class="badge">CUTLASS</span>
-          <p>TF32 Tensor Cores via <code>mma.sync</code>, multi-stage software pipeline (<code>cp.async</code> + <code>ldmatrix</code>) overlaps memory and compute. Near H100 FP32 peak. 32.6×.</p>
+          <div>
+            <p style="margin-bottom: 6px;">TF32 Tensor Cores via <code>mma.sync</code>, multi-stage software pipeline (<code>cp.async</code> + <code>ldmatrix</code>) overlaps memory and compute. 32.6×.</p>
+            <p style="font-size: 12px; color: var(--accent); margin: 0;"><strong>Roofline:</strong> operating against the <em>Tensor Core</em> ceiling — a fundamentally different (and higher) compute roof than FP32 scalar. Near H100 FP32 peak at 169 TFLOP/s.</p>
+          </div>
         </div>
         <div class="insight-card">
           <span class="badge">Triton</span>
-          <p>Autotuner selects tile dimensions, block sizes, and pipeline depth at compile time. Comparable to CUTLASS at large N; gap closes as matrix size grows.</p>
+          <div>
+            <p style="margin-bottom: 6px;">Autotuner selects tile dimensions, block sizes, and pipeline depth at compile time. 139 TFLOP/s at N=4096 — 82% of CUTLASS.</p>
+            <p style="font-size: 12px; color: var(--muted); margin: 0;"><strong>Takeaway:</strong> Triton closes the gap from abstraction to hand-tuned CUDA at large N, confirming the autotuner finds near-optimal tiling without manual register analysis.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -828,9 +871,25 @@
       </div>
 
       <div class="callout important">
-        <h4>Key Engineering Insight — FP16 Underperforms Despite Lower Memory Traffic</h4>
-        <p>
-          FP16 FlashAttention is 3–32% <em>slower</em> than FP32 despite halved memory traffic. At peak 7.8 TFLOP/s the kernel operates at 13% of H100's FP32 ceiling — it is <strong>compute-bound</strong>, not memory-bound. FP16's bandwidth advantage is irrelevant until the kernel saturates the 3.35 TB/s HBM roofline. Nsight Systems confirms: FP16 H2D footprint is exactly half (1.6 MB vs 3.1 MB at N=4096), but kernel time barely changes. The only path to FP16 winning is Tensor Cores (WMMA), which shifts the compute ceiling to ~312 TFLOP/s — a potential 40× over current throughput.
+        <h4>The Most Important Result: FP16 Is Slower Despite Halved Memory Traffic</h4>
+        <p style="margin-bottom: 12px;">
+          This is the central engineering finding of this project. The hypothesis was: FP16 halves HBM traffic, so it should be faster. The measurement said no.
+        </p>
+        <p style="margin-bottom: 12px;">
+          <strong>What Nsight Systems showed:</strong> FP16 H2D footprint is exactly half (1.6 MB vs 3.1 MB at N=4096) — confirming the memory traffic really is halved. But kernel time barely changed: 0.492 ms vs 0.507 ms FP32. The bandwidth saving is real. It just doesn't matter.
+        </p>
+        <p style="margin-bottom: 12px;">
+          <strong>Why:</strong> At peak 7.8 TFLOP/s, <code>cuda_flash</code> operates at 13% of H100's FP32 ceiling of 60 TFLOP/s. The kernel is <em>compute-bound</em> — it is waiting on the ALU, not on HBM. The memory roofline at 3.35 TB/s is not the active constraint. Halving traffic toward a ceiling you're not hitting changes nothing.
+        </p>
+        <p style="margin-bottom: 0;">
+          <strong>What would actually work:</strong> Tensor Cores (WMMA). <code>wmma::load_matrix_sync</code> with 16×16×16 FP16 fragments shifts the compute ceiling from 60 TFLOP/s to ~312 TFLOP/s — a potential 40× over current throughput. FP16 only wins once you're using the right execution unit for it.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-top: 16px;">
+        <h4>Why FlashAttention Is 8.5× Faster Than Naive</h4>
+        <p style="margin-bottom: 0;">
+          <code>cuda_naive</code> materializes the full N×N attention matrix in HBM. At N=4096, that's 256 MB of intermediate scratch written and read back — 4·N²·4 bytes for one attention head. Memory traffic scales as O(N²). FlashAttention tiles Q, K, V in SRAM and runs the online softmax across tiles without ever writing the N×N matrix. HBM traffic drops to O(N·D). The 8.5× speedup is not from a faster algorithm — it is from eliminating the dominant memory traffic entirely.
         </p>
       </div>
     </section>
