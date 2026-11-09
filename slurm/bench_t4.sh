@@ -19,6 +19,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:t4:1
 #SBATCH --cpus-per-gpu=4
+#SBATCH --mem=16G
 
 set -euo pipefail
 
@@ -69,6 +70,32 @@ for SIZE in "${SIZES[@]}"; do
             --no-verify
     done
 done
+
+echo ""
+echo "=== GEMM Benchmarks — Triton V5 (T4) ==="
+VENV="${REPO_ROOT}/.venv_triton"
+if [ ! -d "${VENV}" ]; then
+    echo "  Creating Triton venv at ${VENV} ..."
+    python3 -m venv --system-site-packages "${VENV}"
+    "${VENV}/bin/pip" install --quiet \
+        triton \
+        torch --index-url https://download.pytorch.org/whl/cu121 \
+        || echo "  [warn] pip install incomplete — Triton benchmarks may be skipped"
+fi
+
+if "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+    for SIZE in "${SIZES[@]}"; do
+        echo "--- GEMM triton  M=N=K=${SIZE} ---"
+        srun "${VENV}/bin/python3" "${REPO_ROOT}/scripts/bench_gemm_triton.py" \
+            --m "${SIZE}" --n "${SIZE}" --k "${SIZE}" \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify \
+            --output "${REPO_ROOT}/results/experiments.jsonl" || true
+    done
+else
+    echo "  [skip] triton or torch not importable in ${VENV}"
+fi
 
 echo ""
 echo "=== Done ==="
