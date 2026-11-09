@@ -39,17 +39,33 @@ PROFILES_DIR="${REPO_ROOT}/profiles"
 module load cuda/12.1
 export CUDACXX="$(which nvcc)"
 
-# ncu lives alongside nvcc in the CUDA toolkit bin directory.
-# module load only adds nvcc to PATH; ncu may not be symlinked separately.
-CUDA_BIN_DIR="$(dirname "$(which nvcc)")"
-export PATH="${CUDA_BIN_DIR}:${PATH}"
+# ncu (Nsight Compute CLI) is part of the full CUDA toolkit installer but is
+# NOT installed as a system package on ROSIE — only nvcc is available via apt.
+# Attempt to find it in common HPC locations before giving up.
+_find_ncu() {
+    # 1. Alongside nvcc (standard toolkit layout)
+    local nvcc_dir
+    nvcc_dir="$(dirname "$(which nvcc 2>/dev/null)")"
+    [ -x "${nvcc_dir}/ncu" ] && { echo "${nvcc_dir}/ncu"; return; }
+
+    # 2. CUDA_HOME set by the module
+    [ -x "${CUDA_HOME}/bin/ncu" ] && { echo "${CUDA_HOME}/bin/ncu"; return; }
+
+    # 3. Versioned installations common on cluster shared filesystems
+    for d in /usr/local/cuda/bin /usr/local/cuda-12*/bin /opt/cuda/bin; do
+        [ -x "${d}/ncu" ] && { echo "${d}/ncu"; return; }
+    done
+
+    return 1
+}
+NCU="$(_find_ncu)" || NCU=""
 
 echo "=== Environment ==="
 srun hostname
 GPU_NAME=$(srun nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 echo "GPU: ${GPU_NAME}"
-echo "nvcc: $(which nvcc)"
-echo "ncu:  $(which ncu 2>/dev/null || echo NOT FOUND)"
+echo "nvcc: $(which nvcc 2>/dev/null || echo NOT FOUND)"
+echo "ncu:  ${NCU:-NOT FOUND}"
 date
 echo ""
 
@@ -64,14 +80,19 @@ cd "${REPO_ROOT}"
 echo ""
 
 # Verify ncu is available
-if ! command -v ncu &>/dev/null; then
-    echo "[error] ncu not found — tried PATH=${CUDA_BIN_DIR}"
-    echo "        Contents of ${CUDA_BIN_DIR}:"
-    ls "${CUDA_BIN_DIR}" | grep -E "ncu|nsight" || echo "  (none)"
+if [ -z "${NCU}" ]; then
+    echo "[error] ncu (Nsight Compute CLI) not found on this node."
+    echo "        ncu requires a full CUDA toolkit installation, not just the"
+    echo "        system nvcc package.  On ROSIE, contact sysadmin to install"
+    echo "        cuda-tools-12-1 or run via Singularity with a full CUDA image."
+    echo ""
+    echo "        Diagnostic — nvcc dir contents:"
+    ls "$(dirname "$(which nvcc 2>/dev/null)")" 2>/dev/null | tr '\n' ' '
+    echo ""
     exit 1
 fi
 echo "=== ncu version ==="
-ncu --version | head -3
+"${NCU}" --version | head -3
 echo ""
 
 mkdir -p "${PROFILES_DIR}"
@@ -114,7 +135,7 @@ profile_kernel() {
     # Run with warmup=0, iterations=1 so ncu captures exactly one kernel set.
     # --target-processes all ensures ncu also profiles child processes (srun wrapper).
     # 2>/dev/null suppresses ncu's ==PROF== chatter from the JSON output.
-    ncu \
+    "${NCU}" \
         --metrics "${NCU_METRICS}" \
         --csv --page raw \
         --target-processes all \
