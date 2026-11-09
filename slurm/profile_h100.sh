@@ -39,10 +39,17 @@ PROFILES_DIR="${REPO_ROOT}/profiles"
 module load cuda/12.1
 export CUDACXX="$(which nvcc)"
 
+# ncu lives alongside nvcc in the CUDA toolkit bin directory.
+# module load only adds nvcc to PATH; ncu may not be symlinked separately.
+CUDA_BIN_DIR="$(dirname "$(which nvcc)")"
+export PATH="${CUDA_BIN_DIR}:${PATH}"
+
 echo "=== Environment ==="
 srun hostname
 GPU_NAME=$(srun nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 echo "GPU: ${GPU_NAME}"
+echo "nvcc: $(which nvcc)"
+echo "ncu:  $(which ncu 2>/dev/null || echo NOT FOUND)"
 date
 echo ""
 
@@ -58,7 +65,9 @@ echo ""
 
 # Verify ncu is available
 if ! command -v ncu &>/dev/null; then
-    echo "[error] ncu not found — ensure cuda/12.1 is loaded and ncu is in PATH"
+    echo "[error] ncu not found — tried PATH=${CUDA_BIN_DIR}"
+    echo "        Contents of ${CUDA_BIN_DIR}:"
+    ls "${CUDA_BIN_DIR}" | grep -E "ncu|nsight" || echo "  (none)"
     exit 1
 fi
 echo "=== ncu version ==="
