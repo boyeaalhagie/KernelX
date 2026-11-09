@@ -98,12 +98,14 @@ echo "=== ncu version ==="
 "${NCU}" --version | head -3
 echo ""
 
-# Quick capability check — ncu needs perf_event_paranoid <= 2 or CAP_SYS_ADMIN.
-# Run a trivial profile; if it errors we report clearly rather than silently skipping.
+# Capability check: ncu --target-processes all requires CAP_PERFMON (Linux 5.8+)
+# or perf_event_paranoid <= 2.  HPC clusters typically restrict this.
+# Use timeout to detect hangs; fall back to direct profiling if needed.
 echo "=== ncu capability check ==="
-"${NCU}" --metrics "sm__throughput.avg.pct_of_peak_sustained_elapsed" \
-    --csv --page raw \
-    /bin/true 2>&1 | head -5
+echo "perf_event_paranoid: $(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo unknown)"
+echo "ncu --query-metrics (10s timeout):"
+timeout 10s "${NCU}" --query-metrics 2>&1 | head -3 \
+    || echo "  [timed out or failed — CAP_PERFMON / perf_event_paranoid restriction likely]"
 echo ""
 
 mkdir -p "${PROFILES_DIR}"
@@ -144,16 +146,15 @@ profile_kernel() {
     echo "--- ncu  ${workload} / ${impl}  M=${m} N=${n} K=${k} ---"
 
     # Run with warmup=0, iterations=1 so ncu captures exactly one kernel set.
-    # --target-processes all is required because SLURM runs bench as a child
-    # process of the job script shell.
-    # Raw ncu output saved to tmp file so we can inspect it on parse failure.
+    # --target-processes all requires CAP_PERFMON on Linux 5.8+; try without it
+    # first (bench is ncu's direct target, not a child), then fall back with it.
+    # 120s timeout guards against permission-induced hangs.
     local ncu_tmp
     ncu_tmp="$(mktemp /tmp/ncu_XXXXXX.csv)"
 
-    "${NCU}" \
+    timeout 120s "${NCU}" \
         --metrics "${NCU_METRICS}" \
         --csv --page raw \
-        --target-processes all \
         "${BENCH}" \
             --workload  "${workload}" \
             --implementation "${impl}" \
@@ -162,6 +163,23 @@ profile_kernel() {
             --warmup 0 --iterations 1 \
             --no-verify --no-save \
     > "${ncu_tmp}" 2>&1
+    local ncu_exit=$?
+
+    # If no kernel data, retry with --target-processes all
+    if ! grep -q "^\"" "${ncu_tmp}" 2>/dev/null && [ ${ncu_exit} -eq 0 ]; then
+        timeout 120s "${NCU}" \
+            --metrics "${NCU_METRICS}" \
+            --csv --page raw \
+            --target-processes all \
+            "${BENCH}" \
+                --workload  "${workload}" \
+                --implementation "${impl}" \
+                --m "${m}" --n "${n}" --k "${k}" \
+                --dtype "${dtype}" \
+                --warmup 0 --iterations 1 \
+                --no-verify --no-save \
+        > "${ncu_tmp}" 2>&1 || true
+    fi
 
     echo "  [ncu raw] $(wc -l < "${ncu_tmp}") lines, first 5:"
     head -5 "${ncu_tmp}" | sed 's/^/    /'
