@@ -616,6 +616,7 @@
       <li><a href="#datamovement">Data Movement</a></li>
       <li><a href="#platforms">T4 vs H100</a></li>
       <li><a href="#infrastructure">Infrastructure</a></li>
+      <li><a href="#quickstart">Run It</a></li>
     </ul>
   </nav>
 
@@ -1327,6 +1328,148 @@
   API overhead: 240.262 ms total CUDA API time
   H2D:  134.2 MB  in 18.143 ms  (7.4 GB/s)
 </pre>
+    </section>
+
+    <!-- QUICKSTART -->
+    <section id="quickstart">
+      <div class="section-label">Run It Yourself</div>
+      <h2>Running KernelX on Your GPU</h2>
+      <p>
+        KernelX is a standard CMake + CUDA project. Any NVIDIA GPU from Pascal (2016) onward can run the core kernels. The only flag that changes per device is <code>CMAKE_CUDA_ARCHITECTURES</code>.
+      </p>
+
+      <h3 style="margin-top: 32px; margin-bottom: 16px;">GPU Compatibility</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>GPU Family</th>
+              <th>Examples</th>
+              <th>sm</th>
+              <th>WMMA</th>
+              <th>CUTLASS TF32</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="best"><td>Hopper</td><td>H100, H200</td><td>90</td><td>✓</td><td>✓</td><td>Primary target — full progression</td></tr>
+            <tr><td>Ampere</td><td>A100, A6000, RTX 3090</td><td>80–86</td><td>✓</td><td>✓</td><td>Full support</td></tr>
+            <tr><td>Ada Lovelace</td><td>RTX 4090, RTX 4080</td><td>89</td><td>✓</td><td>✓</td><td>Full support</td></tr>
+            <tr><td>Turing</td><td>T4, RTX 2080</td><td>75</td><td>✓</td><td>—</td><td>CUTLASS uses SIMT FP32 path (no TF32)</td></tr>
+            <tr><td>Volta</td><td>V100</td><td>70</td><td>✓</td><td>—</td><td>WMMA works; no TF32</td></tr>
+            <tr><td>Pascal</td><td>GTX 1080, GTX 1070</td><td>61</td><td>—</td><td>—</td><td>All kernels except cuda_wmma</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top: 40px; margin-bottom: 16px;">Prerequisites</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 32px;">
+        <div class="card">
+          <h3 style="font-size: 12px; margin-bottom: 8px;">CUDA Toolkit</h3>
+          <p style="font-size: 12px; margin: 0;">12.x recommended. 11.8+ works. Install from <a href="https://developer.nvidia.com/cuda-downloads" style="color:var(--accent)">developer.nvidia.com</a>.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; margin-bottom: 8px;">CMake</h3>
+          <p style="font-size: 12px; margin: 0;">3.18 or newer. <code>cmake --version</code> to check.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; margin-bottom: 8px;">C++ Compiler</h3>
+          <p style="font-size: 12px; margin: 0;">GCC 9+ or Clang 10+ with C++17. Required by nvcc.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; margin-bottom: 8px;">CUTLASS headers</h3>
+          <p style="font-size: 12px; margin: 0;">Vendored at <code>third_party/cutlass/</code>. Set up with the sparse-clone step below.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; margin-bottom: 8px;">Python 3.9+</h3>
+          <p style="font-size: 12px; margin: 0;">For <code>analyze.py</code> and <code>parse_nsys.py</code>. No pip installs required beyond stdlib.</p>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 8px; margin-bottom: 16px;">1 — Clone &amp; set up CUTLASS headers</h3>
+<pre>git clone https://github.com/boyea/KernelX.git
+cd KernelX
+
+# CUTLASS is header-only — sparse clone pulls only the include/ tree (~30 MB)
+git clone --depth 1 --branch v3.4.1 \
+          --filter=blob:none --sparse \
+          https://github.com/NVIDIA/cutlass.git third_party/cutlass
+cd third_party/cutlass
+git sparse-checkout set include
+cd ../..</pre>
+
+      <h3 style="margin-top: 32px; margin-bottom: 16px;">2 — Build for your GPU</h3>
+      <p style="font-size: 13px; margin-bottom: 12px;">
+        Replace <code>XX</code> with your GPU's compute capability (see table above). Pass the flag on the <code>cmake</code> line — it overrides the default <code>70 75 80 90</code> multi-arch default and produces a faster, smaller binary.
+      </p>
+<pre># RTX 4090
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=89
+
+# A100 / A6000
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=80
+
+# RTX 3090
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86
+
+# T4 / RTX 2080
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=75
+
+# GTX 1080 (Pascal — no WMMA, no TF32)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=61
+
+cmake --build build -j$(nproc)</pre>
+
+      <h3 style="margin-top: 32px; margin-bottom: 16px;">3 — Run your first benchmark</h3>
+<pre># GEMM progression — runs all five implementations at N=4096
+./build/bench --workload gemm --implementation cuda_naive    --m 4096 --n 4096 --k 4096 --warmup 5 --iterations 20
+./build/bench --workload gemm --implementation cuda_tiled    --m 4096 --n 4096 --k 4096 --warmup 5 --iterations 20
+./build/bench --workload gemm --implementation cuda_tuned    --m 4096 --n 4096 --k 4096 --warmup 5 --iterations 20
+./build/bench --workload gemm --implementation cuda_wmma     --m 4096 --n 4096 --k 4096 --warmup 5 --iterations 20
+./build/bench --workload gemm --implementation cuda_cutlass  --m 4096 --n 4096 --k 4096 --warmup 5 --iterations 20
+
+# Analyze all results so far
+python scripts/analyze.py --workload gemm</pre>
+
+      <h3 style="margin-top: 32px; margin-bottom: 16px;">4 — Run other workloads</h3>
+<pre># FlashAttention
+./build/bench --workload attention --implementation cuda_naive --m 2048 --n 64 --k 1 --warmup 5 --iterations 20
+./build/bench --workload attention --implementation cuda_flash --m 2048 --n 64 --k 1 --warmup 5 --iterations 20
+
+# Softmax — online vs naive
+./build/bench --workload softmax --implementation cuda_naive  --m 1024 --n 4096 --k 1 --warmup 5 --iterations 20
+./build/bench --workload softmax --implementation cuda_online --m 1024 --n 4096 --k 1 --warmup 5 --iterations 20
+
+# LayerNorm
+./build/bench --workload layernorm --implementation cuda_naive   --m 1024 --n 4096 --k 1 --warmup 5 --iterations 20
+./build/bench --workload layernorm --implementation cuda_welford --m 1024 --n 4096 --k 1 --warmup 5 --iterations 20
+
+# Warp reduction
+./build/bench --workload reduction --implementation cuda_naive --m 1024 --n 4096 --k 1 --warmup 5 --iterations 20
+./build/bench --workload reduction --implementation cuda_warp  --m 1024 --n 4096 --k 1 --warmup 5 --iterations 20</pre>
+
+      <h3 style="margin-top: 32px; margin-bottom: 16px;">5 — On ROSIE (SLURM)</h3>
+      <p style="font-size: 13px; margin-bottom: 12px;">
+        The SLURM scripts handle build + full benchmark sweep in one submission. Each script targets a specific partition and passes the correct <code>CMAKE_CUDA_ARCHITECTURES</code> automatically.
+      </p>
+<pre># H100 — full suite, all workloads, all sizes (builds for sm_90)
+sbatch slurm/bench_h100.sh
+
+# T4 — teaching partition (builds for sm_75)
+sbatch slurm/bench_t4.sh
+
+# Profile all kernels with Nsight Systems
+sbatch slurm/profile_nsys.sh
+
+# Monitor
+squeue -u &lt;your_username&gt;
+tail -f job_&lt;JOBID&gt;.out</pre>
+
+      <div class="callout" style="margin-top: 24px;">
+        <h4>All results go to the same file</h4>
+        <p style="margin: 0;">
+          Every run — regardless of GPU, workload, or engine — appends a JSON record to <code>results/experiments.jsonl</code> tagged with the GPU name, git commit, and timestamp. Run the same workload on a T4 today and an H100 tomorrow, then <code>python scripts/analyze.py --workload gemm</code> shows both side by side. No manual tracking.
+        </p>
+      </div>
     </section>
 
   </div><!-- .main-content -->
