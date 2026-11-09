@@ -17,6 +17,9 @@
 #include "workloads/reduction/impl/cpu_reference.hpp"
 #include "workloads/reduction/impl/cuda_naive.hpp"
 #include "workloads/reduction/impl/cuda_warp.hpp"
+#include "workloads/datamove/impl/pageable.hpp"
+#include "workloads/datamove/impl/pinned.hpp"
+#include "workloads/datamove/impl/pinned_async.hpp"
 #include "workloads/workload.hpp"
 
 #include <iostream>
@@ -72,7 +75,12 @@ static void print_usage(const char* prog) {
         "  attention  / cuda_flash\n"
         "  reduction  / cpu_reference\n"
         "  reduction  / cuda_naive\n"
-        "  reduction  / cuda_warp\n\n"
+        "  reduction  / cuda_warp\n"
+        "  datamove   / pageable\n"
+        "  datamove   / pinned\n"
+        "  datamove   / pinned_async\n\n"
+        "  Note: datamove --n <floats>  (transfer size = n×4 bytes)\n"
+        "        'TFLOP/s' column reads as GB/s for datamove.\n\n"
         "Example:\n"
         "  ./bench --workload gemm --implementation cuda_naive \\\n"
         "          --m 4096 --n 4096 --k 4096 --dtype fp32   \\\n"
@@ -144,6 +152,12 @@ static std::unique_ptr<kernelx::Workload> make_workload(
         if (impl == "cuda_naive")    return std::make_unique<kernelx::ReductionCudaNaive>();
         if (impl == "cuda_warp")     return std::make_unique<kernelx::ReductionCudaWarp>();
         throw std::invalid_argument("unknown reduction implementation: '" + impl + "'");
+    }
+    if (workload == "datamove") {
+        if (impl == "pageable")     return std::make_unique<kernelx::DataMovePageable>();
+        if (impl == "pinned")       return std::make_unique<kernelx::DataMovePinned>();
+        if (impl == "pinned_async") return std::make_unique<kernelx::DataMovePinnedAsync>();
+        throw std::invalid_argument("unknown datamove implementation: '" + impl + "'");
     }
     throw std::invalid_argument("unknown workload: '" + workload + "'");
 }

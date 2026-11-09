@@ -186,6 +186,30 @@ for N_SIZE in "${RED_N_SIZES[@]}"; do
 done
 
 echo ""
+echo "=== Data Movement Benchmarks (H100) ==="
+# N = number of float elements; transfer size = N × 4 bytes.
+# Sizes: 4 MB → 1 GB, covering latency-dominated → bandwidth-saturated regimes.
+# 'TFLOP/s' column reads directly as GB/s (see DataMoveWorkload::flops()).
+# Peak H100 PCIe 5.0 × 16 unidirectional: ~64 GB/s.
+DM_N_SIZES=(1048576 4194304 16777216 67108864 268435456)
+DM_IMPLS=(pageable pinned pinned_async)
+
+for N_SIZE in "${DM_N_SIZES[@]}"; do
+    for IMPL in "${DM_IMPLS[@]}"; do
+        SIZE_MB=$(( N_SIZE * 4 / 1024 / 1024 ))
+        echo "--- DataMove ${IMPL}  N=${N_SIZE} (${SIZE_MB} MB) ---"
+        srun "${BENCH}" \
+            --workload datamove \
+            --implementation "${IMPL}" \
+            --m 1 --n "${N_SIZE}" --k 1 \
+            --dtype fp32 \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify
+    done
+done
+
+echo ""
 echo "=== Done ==="
 date
 echo "Results written to ${REPO_ROOT}/results/experiments.jsonl"

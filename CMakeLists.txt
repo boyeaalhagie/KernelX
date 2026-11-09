@@ -73,6 +73,10 @@ set(KERNELX_SOURCES
     src/workloads/reduction/impl/cpu_reference.cpp
     src/workloads/reduction/impl/cuda_naive.cu
     src/workloads/reduction/impl/cuda_warp.cu
+    src/workloads/datamove/datamove_workload.cpp
+    src/workloads/datamove/impl/pageable.cu
+    src/workloads/datamove/impl/pinned.cu
+    src/workloads/datamove/impl/pinned_async.cu
 )
 
 # ── CUTLASS TF32 Tensor Core path (sm_80+ only) ───────────────────────────────

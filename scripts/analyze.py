@@ -212,6 +212,53 @@ _INSIGHTS: dict[tuple, dict] = {
             "inside a compute-heavier pass, raising the effective AI."
         ),
     },
+    ("datamove", "pageable"): {
+        "observed": (
+            "Pageable transfer requires CUDA to stage data through an internal "
+            "pinned bounce buffer before the DMA engine can initiate the PCIe "
+            "transfer.  This two-step process (CPU memcpy → staging → DMA) "
+            "caps effective bandwidth well below the PCIe ceiling.  "
+            "At large transfer sizes (≥64 MB) the staging bottleneck is fully "
+            "visible: pageable ≈ 50–60% of pinned bandwidth."
+        ),
+        "next": (
+            "pinned: allocate the host buffer with cudaMallocHost once at setup.  "
+            "The DMA engine transfers directly — no staging, approaches full "
+            "PCIe 5.0 × 16 unidirectional bandwidth (~64 GB/s on H100)."
+        ),
+    },
+    ("datamove", "pinned"): {
+        "observed": (
+            "Pinned (page-locked) allocation eliminates the staging bottleneck.  "
+            "cudaMallocHost wires the buffer's physical pages so its address is "
+            "stable; the DMA engine reads directly without any CPU involvement.  "
+            "Throughput approaches the PCIe 5.0 × 16 ceiling.  "
+            "cudaMemcpy blocks the CPU until the transfer completes."
+        ),
+        "next": (
+            "pinned_async: replace cudaMemcpy with cudaMemcpyAsync on a dedicated "
+            "stream.  The CPU returns immediately after enqueuing the DMA, "
+            "enabling compute-DMA overlap in a double-buffered pipeline.  "
+            "Raw bandwidth is identical to pinned — the win is latency hiding."
+        ),
+    },
+    ("datamove", "pinned_async"): {
+        "observed": (
+            "cudaMemcpyAsync enqueues the DMA on a dedicated stream and returns "
+            "to the CPU immediately.  PCIe bandwidth matches the synchronous "
+            "pinned baseline — the hardware DMA path is identical.  "
+            "The benefit is concurrency: a double-buffered pipeline can overlap "
+            "H2D for batch N+1 with kernel execution on batch N, hiding the "
+            "transfer latency behind compute.  With a single stream and no "
+            "concurrent kernel, throughput matches pinned exactly."
+        ),
+        "next": (
+            "To demonstrate overlap: add a second pinned buffer and stream, "
+            "and alternate batches (stream 0: H2D batch 0, stream 1: kernel "
+            "on batch 0 + H2D batch 1 simultaneously).  Effective throughput "
+            "can reach compute throughput + PCIe bandwidth simultaneously."
+        ),
+    },
 }
 
 

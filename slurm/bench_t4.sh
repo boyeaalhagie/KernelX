@@ -178,6 +178,28 @@ else
 fi
 
 echo ""
+echo "=== Data Movement Benchmarks (T4) ==="
+# T4 uses PCIe 3.0 × 16: ~16 GB/s unidirectional (vs H100 PCIe 5.0 ~64 GB/s).
+# Cap at 256 MB to keep job time reasonable.
+DM_N_SIZES=(1048576 4194304 16777216 67108864)
+DM_IMPLS=(pageable pinned pinned_async)
+
+for N_SIZE in "${DM_N_SIZES[@]}"; do
+    for IMPL in "${DM_IMPLS[@]}"; do
+        SIZE_MB=$(( N_SIZE * 4 / 1024 / 1024 ))
+        echo "--- DataMove ${IMPL}  N=${N_SIZE} (${SIZE_MB} MB) ---"
+        srun "${BENCH}" \
+            --workload datamove \
+            --implementation "${IMPL}" \
+            --m 1 --n "${N_SIZE}" --k 1 \
+            --dtype fp32 \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify
+    done
+done
+
+echo ""
 echo "=== Done ==="
 date
 echo "Results written to ${REPO_ROOT}/results/experiments.jsonl"
