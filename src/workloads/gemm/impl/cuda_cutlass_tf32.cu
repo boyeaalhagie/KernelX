@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 
+namespace kernelx {
 namespace kernelx_internal {
 
 // ── CUTLASS Gemm type alias — TF32 Tensor Cores ───────────────────────────────
@@ -66,3 +67,4 @@ void launch_cutlass_tf32(int M, int N, int K,
 }
 
 } // namespace kernelx_internal
+} // namespace kernelx
