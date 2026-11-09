@@ -2,12 +2,15 @@
 """
 analyze.py — KernelX performance engineering report.
 
-Reads benchmark records (results/experiments.jsonl) and Nsight Compute
-profile records (profiles/ncu_records.jsonl), then prints the full
-performance analysis described in KernelX §20:
+Reads benchmark records (results/experiments.jsonl), Nsight Compute
+profile records (profiles/ncu_records.jsonl), and Nsight Systems profile
+records (profiles/nsys_records.jsonl), then prints the full performance
+analysis described in KernelX §20:
 
   - Timing table with speedup vs baseline
-  - Nsight Speed-of-Light (compute / HBM / L1 / L2)
+  - Nsight Systems kernel timing (avg/med/min/max, instances)
+  - API overhead and PCIe memory transfer bandwidth
+  - Nsight Speed-of-Light (compute / HBM / L1 / L2)  [if ncu available]
   - Roofline position (arithmetic intensity vs hardware ridge point)
   - Occupancy and limiting factor
   - Dominant warp stall type
@@ -350,6 +353,29 @@ def filter_ncu(records: list[dict],
     return out
 
 
+def filter_nsys(records: list[dict],
+                workload: str,
+                m: Optional[int],
+                n: Optional[int],
+                k: Optional[int]) -> list[dict]:
+    out = [r for r in records if r.get("workload") == workload]
+    if m is not None:
+        out = [r for r in out if r.get("m") == m]
+    if n is not None:
+        out = [r for r in out if r.get("n") == n]
+    if k is not None:
+        out = [r for r in out if r.get("k") == k]
+    return out
+
+
+def latest_nsys_per_impl(records: list[dict]) -> dict[str, dict]:
+    """Return the most recent nsys record for each implementation."""
+    out: dict[str, dict] = {}
+    for r in sorted(records, key=lambda r: r.get("timestamp", "")):
+        out[r.get("implementation", "?")] = r
+    return out
+
+
 def latest_per_impl(records: list[dict]) -> dict[str, dict]:
     """Return the most recent record for each implementation."""
     out: dict[str, dict] = {}
@@ -495,6 +521,47 @@ def print_ncu_section(ncu_records: list[dict], gpu: str) -> None:
         print(f"  Top warp stall:    {top_stall_name}  {top_stall_pct:.1f}%")
 
 
+def print_nsys_section(rec: dict) -> None:
+    """Print Nsight Systems kernel timing, API overhead, and PCIe transfer bandwidth."""
+    kname = rec.get("kernel_name", "")
+    kshort = kname.split("(")[0].split("::")[-1][:50] if kname else "[not found]"
+
+    avg_ms  = rec.get("kernel_avg_ns", 0) / 1e6
+    med_ms  = rec.get("kernel_med_ns", 0) / 1e6
+    min_ms  = rec.get("kernel_min_ns", 0) / 1e6
+    max_ms  = rec.get("kernel_max_ns", 0) / 1e6
+    inst    = rec.get("kernel_instances", 0)
+    api_ns  = rec.get("api_total_ns", 0)
+
+    h2d_b   = rec.get("h2d_bytes", 0)
+    d2h_b   = rec.get("d2h_bytes", 0)
+    h2d_ns  = rec.get("h2d_time_ns", 0)
+    d2h_ns  = rec.get("d2h_time_ns", 0)
+
+    print(f"\n  Kernel:  {kshort}")
+    if inst:
+        print(f"  Timing (ms)   avg {avg_ms:.3f}   med {med_ms:.3f}   "
+              f"min {min_ms:.3f}   max {max_ms:.3f}   × {inst} launches")
+    else:
+        print("  Timing: [kernel not captured — check nsys output]")
+
+    if api_ns:
+        print(f"  API overhead: {api_ns/1e6:.3f} ms total CUDA API time")
+
+    if h2d_b:
+        h2d_bw = h2d_b / max(h2d_ns, 1)   # GB/s (bytes/ns = GB/s)
+        print(f"  H2D:  {h2d_b/1e6:.1f} MB  in {h2d_ns/1e6:.3f} ms  "
+              f"({h2d_bw:.1f} GB/s)")
+    if d2h_b:
+        d2h_bw = d2h_b / max(d2h_ns, 1)
+        print(f"  D2H:  {d2h_b/1e6:.1f} MB  in {d2h_ns/1e6:.3f} ms  "
+              f"({d2h_bw:.1f} GB/s)")
+
+    commit = rec.get("git_commit", "?")
+    ts     = rec.get("timestamp", "?")[:19].replace("T", " ")
+    print(f"  Recorded: {ts}  commit {commit}")
+
+
 def print_insights(workload: str, impl: str) -> None:
     """Print engineering interpretation for the given (workload, impl) pair."""
     key = (workload, impl)
@@ -521,18 +588,22 @@ def main() -> None:
     parser.add_argument("--k",   type=int, default=None, help="Filter by K dimension")
     parser.add_argument("--impl",      default=None,
                         help="Implementation to show Nsight detail for (default: all)")
-    parser.add_argument("--file",      default="results/experiments.jsonl")
-    parser.add_argument("--ncu-file",  default="profiles/ncu_records.jsonl")
+    parser.add_argument("--file",       default="results/experiments.jsonl")
+    parser.add_argument("--ncu-file",   default="profiles/ncu_records.jsonl")
+    parser.add_argument("--nsys-file",  default="profiles/nsys_records.jsonl")
     args = parser.parse_args()
 
     bench_all = load_jsonl(Path(args.file))
     ncu_all   = load_jsonl(Path(args.ncu_file))
+    nsys_all  = load_jsonl(Path(args.nsys_file))
 
     bench_filtered = filter_bench(bench_all, args.workload, args.m, args.n, args.k)
     ncu_filtered   = filter_ncu(ncu_all,   args.workload, args.m, args.n, args.k)
+    nsys_filtered  = filter_nsys(nsys_all, args.workload, args.m, args.n, args.k)
 
-    bench_map  = latest_per_impl(bench_filtered)
-    ncu_by_impl = latest_ncu_per_impl(ncu_filtered)
+    bench_map    = latest_per_impl(bench_filtered)
+    ncu_by_impl  = latest_ncu_per_impl(ncu_filtered)
+    nsys_by_impl = latest_nsys_per_impl(nsys_filtered)
 
     # Determine GPU from records for ridge-point calculation
     gpu = "NVIDIA H100 80GB HBM3"
@@ -557,14 +628,35 @@ def main() -> None:
     print()
     print_timing_table(bench_map, args.workload)
 
-    # ── 2. Nsight Compute sections ────────────────────────────────────────────
-    impls_to_show = ([args.impl] if args.impl else list(ncu_by_impl.keys()))
+    # ── 2. Nsight Systems + Nsight Compute sections ───────────────────────────
+    all_impls = sorted(
+        set(list(nsys_by_impl.keys()) + list(ncu_by_impl.keys()))
+        if not args.impl else [args.impl]
+    )
+    # Also show insights for impls that only have bench records
+    if not all_impls and not args.impl:
+        all_impls = sorted(bench_map.keys())
 
-    for impl in impls_to_show:
-        ncu_recs = ncu_by_impl.get(impl, [])
-        print(section(f"Nsight Compute Analysis — {impl}"))
-        print_ncu_section(ncu_recs, gpu)
-        print_insights(args.workload, impl)
+    for impl in all_impls:
+        nsys_rec  = nsys_by_impl.get(impl)
+        ncu_recs  = ncu_by_impl.get(impl, [])
+
+        if nsys_rec:
+            print(section(f"Nsight Systems Profile — {impl}"))
+            print_nsys_section(nsys_rec)
+
+        if ncu_recs:
+            print(section(f"Nsight Compute Analysis — {impl}"))
+            print_ncu_section(ncu_recs, gpu)
+
+        if nsys_rec or ncu_recs:
+            print_insights(args.workload, impl)
+
+    # Insights for bench-only impls (no nsys or ncu data)
+    if not args.impl:
+        for impl in sorted(bench_map.keys()):
+            if impl not in all_impls:
+                print_insights(args.workload, impl)
 
     print()
     print(f"  {'═' * W}")
