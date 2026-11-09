@@ -6,41 +6,38 @@
 // FlashAttention-1 kernel — single-pass tiled attention, no N×N scratch.
 //
 // Tile geometry:
-//   kBc = 32   K/V tile width (one column per lane; one full tile per warp)
-//   kD  = 64   head dimension (compile-time constant for register arrays)
+//   kBc = 32   K/V tile width (kBc == warpSize: one key per lane per tile)
+//   kD  = 64   head dimension (compile-time constant)
 //
 // Thread/block mapping:
-//   Block: (32,)       — one warp per block
-//   Grid:  (N,)        — one block (warp) per query row i
+//   Block: (32,)   Grid: (N,)   — one warp per query row i
+//
+// Lane ownership of output dimensions:
+//   Lane tid owns output dims [tid] and [tid+32]  (kD/32 = 2 dims per lane).
+//   o_reg[2] holds the running unnormalised output for those 2 dimensions.
+//   This keeps the accumulator entirely in registers (no spill) and makes the
+//   V-accumulation loop O(1) per lane per j, vs O(kD) in the naïve layout.
 //
 // Shared memory per block (kBc=32, kD=64):
-//   s_K[kBc][kD] = 32×64×4 = 8  KB
-//   s_V[kBc][kD] = 32×64×4 = 8  KB
-//   s_S[kBc]     = 32×4    = 128 B
-//   s_Q[kD]      = 64×4    = 256 B
-//   Total ≈ 16.5 KB   (well within 48 KB L1 on Ampere/Hopper)
+//   s_Q[kD]      = 256 B   (Q[i] loaded once, shared across all tiles)
+//   s_K[kBc][kD] = 8  KB   (K tile, reloaded per tile)
+//   s_V[kBc][kD] = 8  KB   (V tile, reloaded per tile)
+//   s_S[kBc]     = 128 B   (per-tile attention scores, one per lane)
+//   Total ≈ 16.5 KB (well within 48 KB L1 on Ampere/Hopper)
 //
-// Online state (registers, per query row):
-//   m          = -FLT_MAX   (running max)
-//   l          =  0.0f      (running sum = partition function)
-//   o_reg[kD]  =  0.0f      (running output accumulator, unnormalised)
+// Per-tile algorithm:
+//   1. Load K/V tile collaboratively (lane tid loads row tid of each tile).
+//   2. Lane tid computes full dot product: S[tid] = dot(s_Q, s_K[tid]) * scale
+//      — 64 sequential FMAs per lane; this is unavoidable, O(N·D) total work.
+//   3. Warp-reduce for tile max → tile_m; compute m_new = max(m, tile_m).
+//   4. Rescale o_reg[0..1] by exp(m - m_new)  (2 ops, not 64).
+//   5. For each j in [0, tile_width):
+//        e_j = exp(S[j] - m_new);  tile_l += e_j
+//        o_reg[0] += e_j * s_V[j][tid];      ← only 2 FMAs per j per lane
+//        o_reg[1] += e_j * s_V[j][tid + 32];
+//   6. Update l, m.
 //
-// Tile loop (tc = tile count = ceil(N/kBc)):
-//   1. Collaboratively load K[tc*kBc:(tc+1)*kBc, :] → s_K  (tid as lane)
-//   2. Collaboratively load V[tc*kBc:(tc+1)*kBc, :] → s_V
-//   3. __syncwarp()
-//   4. Compute S[j] = dot(Q[i], s_K[j]) * scale,  j in [0, tile_width)
-//      (each lane j computes one score; tid==j for exact alignment)
-//   5. __syncwarp() — ensure s_S broadcast-ready
-//   6. tile_m = max(S[0..tile_width))  via warp shfl reduction
-//   7. m_new = max(m, tile_m)
-//   8. Rescale o_reg: o_reg[d] *= exp(m - m_new)
-//   9. For each j in tile: o_reg[d] += exp(S[j] - m_new) * s_V[j][d]
-//  10. tile_l = sum(exp(S[j] - m_new))  via warp shfl reduction
-//  11. l = l * exp(m - m_new) + tile_l
-//  12. m = m_new
-//
-// Final: O[i,d] = o_reg[d] / l
+// Final: o_row[tid] = o_reg[0] / l;   o_row[tid+32] = o_reg[1] / l
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace kernelx {
@@ -70,10 +67,10 @@ __global__ void flash_attn_kernel(
     s_Q[tid + 32] = Q[i * kD + tid + 32];
     __syncwarp();
 
-    // Online state
-    float m = -FLT_MAX;
-    float l = 0.0f;
-    float o_reg[kD] = {};   // zero-initialised; kD is compile-time constant
+    // Online state.  o_reg[0] accumulates dim tid; o_reg[1] accumulates dim tid+32.
+    float m       = -FLT_MAX;
+    float l       = 0.0f;
+    float o_reg[2] = {};   // 2 elements per lane, kD/32 = 2 dims owned by each lane
 
     const int tc = (N + kBc - 1) / kBc;   // number of K/V tiles
 
@@ -114,21 +111,22 @@ __global__ void flash_attn_kernel(
         tile_m = __shfl_sync(0xFFFFFFFF, tile_m, 0);
 
         // ── Rescale running output with new max ───────────────────────────
-        const float m_new    = fmaxf(m, tile_m);
-        const float rescale  = expf(m - m_new);
-        for (int d = 0; d < kD; ++d)
-            o_reg[d] *= rescale;
+        const float m_new   = fmaxf(m, tile_m);
+        const float rescale = expf(m - m_new);
+        o_reg[0] *= rescale;   // dim tid
+        o_reg[1] *= rescale;   // dim tid+32
 
-        // ── Accumulate: for each key j, add exp(S[j]-m_new) * V[j] ──────
-        // All lanes cooperate: lane j "owns" row j of s_V; we iterate over j
-        // using the full warp to cover all kD output dimensions.
-        // Each lane broadcasts its exp(S[j]-m_new) and V[j][d] contribution.
+        // ── Accumulate V contribution for this tile ───────────────────────
+        // Each lane owns 2 output dimensions: [tid] and [tid+32].
+        // The j-loop is sequential (O(kBc) iterations) but each iteration is
+        // just 2 FMAs per lane — O(kBc·kD/32) total work per lane per tile.
+        // Collectively across all 32 lanes this covers all kD output dims.
         float tile_l = 0.0f;
         for (int j = 0; j < tile_width; ++j) {
             const float e_j = expf(s_S[j] - m_new);
-            tile_l += e_j;
-            for (int d = 0; d < kD; ++d)
-                o_reg[d] += e_j * s_V[j][d];
+            tile_l  += e_j;
+            o_reg[0] += e_j * s_V[j][tid];       // dimension tid
+            o_reg[1] += e_j * s_V[j][tid + 32];  // dimension tid+32
         }
 
         l = l * rescale + tile_l;
@@ -139,9 +137,8 @@ __global__ void flash_attn_kernel(
     // ── Normalise and write output ────────────────────────────────────────
     const float inv_l = 1.0f / l;
     float* o_row = O + static_cast<ptrdiff_t>(i) * kD;
-    // Each lane writes kD/32 = 2 output elements
-    for (int d = tid; d < kD; d += 32)
-        o_row[d] = o_reg[d] * inv_l;
+    o_row[tid]      = o_reg[0] * inv_l;   // dim tid     (lane ownership)
+    o_row[tid + 32] = o_reg[1] * inv_l;   // dim tid+32
 }
 
 void AttentionCudaFlash::setup(const WorkloadConfig& cfg) {
