@@ -43,15 +43,18 @@ export CUDACXX="$(which nvcc)"
 # NOT installed as a system package on ROSIE — only nvcc is available via apt.
 # Attempt to find it in common HPC locations before giving up.
 _find_ncu() {
-    # 1. Alongside nvcc (standard toolkit layout)
+    # 1. User-local toolkit install (installed via runfile --toolkitpath)
+    [ -x "${HOME}/cuda_local/bin/ncu" ] && { echo "${HOME}/cuda_local/bin/ncu"; return; }
+
+    # 2. Alongside nvcc (standard toolkit layout)
     local nvcc_dir
     nvcc_dir="$(dirname "$(which nvcc 2>/dev/null)")"
     [ -x "${nvcc_dir}/ncu" ] && { echo "${nvcc_dir}/ncu"; return; }
 
-    # 2. CUDA_HOME set by the module
+    # 3. CUDA_HOME set by the module
     [ -x "${CUDA_HOME}/bin/ncu" ] && { echo "${CUDA_HOME}/bin/ncu"; return; }
 
-    # 3. Versioned installations common on cluster shared filesystems
+    # 4. Versioned installations common on cluster shared filesystems
     for d in /usr/local/cuda/bin /usr/local/cuda-12*/bin /opt/cuda/bin; do
         [ -x "${d}/ncu" ] && { echo "${d}/ncu"; return; }
     done
