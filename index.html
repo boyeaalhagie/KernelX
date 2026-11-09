@@ -691,10 +691,6 @@
       <p>
         Modern AI workloads are increasingly constrained by how efficiently computation moves through GPU hardware — not simply whether the model produces the correct output. The gap between a correct naive implementation and a hardware-efficient one is not a constant factor. It is specific to the kernel, the problem size, and the hardware generation. The only way to close that gap systematically is to measure it, understand it, and act on what the measurement says.
       </p>
-      <p>
-        NVIDIA's performance engineering roles explicitly involve kernels like attention, matrix multiplication, MoE routing, quantization, and data movement — using CUDA, CUTLASS, and Triton — with repeatable benchmarks, roofline analysis, regression gates, and Nsight tooling. This project is a focused implementation of that workflow on a realistic slice of those workloads, running on NVIDIA H100 hardware.
-      </p>
-
       <h3 style="margin-top: 36px; margin-bottom: 16px;">The Workflow</h3>
       <div style="background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 24px; margin-bottom: 24px;">
         <div style="display: flex; flex-direction: column; align-items: center; gap: 0; font-family: var(--font-mono); font-size: 12px;">
@@ -752,9 +748,6 @@
     <section id="overview">
       <div class="section-label">Methodology</div>
       <h2>Four-Layer Architecture</h2>
-      <p>
-        KernelX is structured around a repeating engineering loop: start with a correct baseline, profile to find the actual bottleneck, implement a targeted fix, measure the delta. Each workload progresses from naive through hardware-aware implementations, with Nsight Systems confirming (or refuting) the hypothesis at each step.
-      </p>
 
       <div class="layers-grid">
         <div class="layer-card">
