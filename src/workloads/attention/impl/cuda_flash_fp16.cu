@@ -2,6 +2,8 @@
 #include "utils/cuda_utils.hpp"
 #include <cfloat>
 #include <cuda_fp16.h>
+#include <iostream>
+#include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mixed-precision FlashAttention-1 — FP16 global memory, FP32 accumulators.
