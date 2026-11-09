@@ -25,6 +25,24 @@ set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -lineinfo")   # -lineinfo keeps source mapping
 # ── Dependencies ─────────────────────────────────────────────────────────────
 find_package(CUDAToolkit REQUIRED)
 
+# ── CUTLASS (header-only) ─────────────────────────────────────────────────────
+# Headers are fetched once and cached in the build directory.
+# On compute nodes without internet access, run cmake once on the login node
+# before submitting — subsequent builds reuse the cached source.
+include(FetchContent)
+FetchContent_Declare(
+    cutlass
+    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
+    GIT_TAG        v3.5.0
+    GIT_SHALLOW    TRUE
+    GIT_SUBMODULES ""
+)
+set(CUTLASS_ENABLE_HEADERS_ONLY ON  CACHE BOOL "" FORCE)
+set(CUTLASS_ENABLE_TESTS        OFF CACHE BOOL "" FORCE)
+set(CUTLASS_ENABLE_EXAMPLES     OFF CACHE BOOL "" FORCE)
+set(CUTLASS_ENABLE_TOOLS        OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(cutlass)
+
 # ── Sources ───────────────────────────────────────────────────────────────────
 set(KERNELX_SOURCES
     src/main.cpp
@@ -35,6 +53,7 @@ set(KERNELX_SOURCES
     src/workloads/gemm/impl/cuda_naive.cu
     src/workloads/gemm/impl/cuda_tiled.cu
     src/workloads/gemm/impl/cuda_tuned.cu
+    src/workloads/gemm/impl/cuda_cutlass.cu
 )
 
 add_executable(bench ${KERNELX_SOURCES})
@@ -44,7 +63,7 @@ target_include_directories(bench PRIVATE
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 
-target_link_libraries(bench PRIVATE CUDA::cudart)
+target_link_libraries(bench PRIVATE CUDA::cudart nvidia::cutlass::cutlass)
 
 target_compile_options(bench PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:

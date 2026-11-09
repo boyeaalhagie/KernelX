@@ -24,10 +24,11 @@ set -euo pipefail
 
 # SLURM_SUBMIT_DIR is set by SLURM to the directory where sbatch was invoked
 REPO_ROOT="${SLURM_SUBMIT_DIR}"
-BUILD_DIR="${REPO_ROOT}/build"
+BUILD_DIR="${REPO_ROOT}/build_t4"
 BENCH="${BUILD_DIR}/bench"
 
 module load cuda/12.9
+export CUDACXX="$(which nvcc)"
 
 echo "=== Environment ==="
 srun hostname
@@ -47,7 +48,7 @@ echo "=== GEMM Benchmarks (T4) ==="
 
 # Smaller sizes for T4 — 4096³ at low bandwidth will take a while
 SIZES=(512 1024 2048)
-IMPLS=(cuda_naive cuda_tiled cuda_tuned)
+IMPLS=(cuda_naive cuda_tiled cuda_tuned cuda_cutlass)
 WARMUP=10
 ITERS=50
 

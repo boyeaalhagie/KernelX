@@ -55,7 +55,7 @@ The four project layers map directly to this structure:
 | GEMM | `cuda_naive` | ✓ | V1: one thread per element, global memory only |
 | GEMM | `cuda_tiled` | ✓ | V2: shared-memory tiling, TILE=32 |
 | GEMM | `cuda_tuned` | ✓ | V3: register blocking, BM=BN=64 BK=8 TM=TN=4 |
-| GEMM | `cutlass` | Planned | V4: CUTLASS GEMM primitives |
+| GEMM | `cuda_cutlass` | ✓ | V4: CUTLASS device Gemm; GemmSimt on sm_75, GemmTF32 (TF32 TC) on sm_80+ |
 | GEMM | `triton` | Planned | V5: Triton kernel, comparison vs CUDA |
 | Softmax | `cpu_reference` | Planned | Numerically stable (online algorithm) |
 | Softmax | `cuda_online` | Planned | Single-pass online softmax |
@@ -191,7 +191,7 @@ Because every record includes the `gpu` field, results from all three GPUs accum
 
 | Category | Technologies |
 |----------|-------------|
-| Kernel implementations | CUDA C++, CUTLASS (planned), Triton (planned) |
+| Kernel implementations | CUDA C++, CUTLASS 3.5.0, Triton (planned) |
 | Profiling | Nsight Compute, Nsight Systems |
 | Build | CMake 3.18+, CUDA Toolkit |
 | Analysis | Python, NumPy, Pandas, Matplotlib |

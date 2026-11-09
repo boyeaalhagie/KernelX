@@ -19,14 +19,16 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:h100:1
 #SBATCH --cpus-per-gpu=8
+#SBATCH --mem=32G
 
 set -euo pipefail
 
 REPO_ROOT="${SLURM_SUBMIT_DIR}"
-BUILD_DIR="${REPO_ROOT}/build"
+BUILD_DIR="${REPO_ROOT}/build_h100"
 BENCH="${BUILD_DIR}/bench"
 
 module load cuda/12.1
+export CUDACXX="$(which nvcc)"
 
 echo "=== Environment ==="
 srun hostname
@@ -45,7 +47,7 @@ echo ""
 echo "=== GEMM Benchmarks (H100) ==="
 
 SIZES=(512 1024 2048 4096)
-IMPLS=(cuda_naive cuda_tiled cuda_tuned)
+IMPLS=(cuda_naive cuda_tiled cuda_tuned cuda_cutlass)
 WARMUP=20
 ITERS=100
 
