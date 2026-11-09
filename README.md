@@ -80,7 +80,7 @@ KernelX/
 ### Clone
 
 ```bash
-git clone https://github.com/boyea/KernelX.git
+git clone https://github.com/boyeaalhagie/KernelX.git
 cd KernelX
 
 # CUTLASS headers (header-only, sparse clone — ~30 MB)
