@@ -191,7 +191,7 @@ Because every record includes the `gpu` field, results from all three GPUs accum
 
 | Category | Technologies |
 |----------|-------------|
-| Kernel implementations | CUDA C++, CUTLASS 3.5.0, Triton (planned) |
+| Kernel implementations | CUDA C++, CUTLASS 3.4.1, Triton (planned) |
 | Profiling | Nsight Compute, Nsight Systems |
 | Build | CMake 3.18+, CUDA Toolkit |
 | Analysis | Python, NumPy, Pandas, Matplotlib |

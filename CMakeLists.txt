@@ -26,7 +26,7 @@ set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -lineinfo")   # -lineinfo keeps source mapping
 find_package(CUDAToolkit REQUIRED)
 
 # ── CUTLASS (header-only) ─────────────────────────────────────────────────────
-# CUTLASS 3.5.0 headers are vendored at third_party/cutlass/include via a
+# CUTLASS 3.4.1 headers are vendored at third_party/cutlass/include via a
 # sparse git clone (see third_party/cutlass/.git).  No internet access is
 # required on compute nodes; headers live on the shared home filesystem.
 #
@@ -36,7 +36,7 @@ if(NOT EXISTS "${CUTLASS_INCLUDE_DIR}/cutlass/cutlass.h")
     message(FATAL_ERROR
         "CUTLASS headers not found at ${CUTLASS_INCLUDE_DIR}.\n"
         "Run from the repo root:\n"
-        "  git clone --depth 1 --branch v3.5.0 --filter=blob:none --sparse "
+        "  git clone --depth 1 --branch v3.4.1 --filter=blob:none --sparse "
         "https://github.com/NVIDIA/cutlass.git third_party/cutlass\n"
         "  cd third_party/cutlass && git sparse-checkout set include")
 endif()
