@@ -74,19 +74,22 @@ echo "=== GEMM Benchmarks — Triton V5 (H100) ==="
 # Triton needs PyTorch.  Set up a venv on first run; reuse on subsequent runs.
 # --system-site-packages picks up any cluster-wide torch/triton if present.
 VENV="${REPO_ROOT}/.venv_triton"
-# Check importability rather than directory existence — handles the case where
-# the venv was set up by a T4 job (which has internet access) and we just reuse it.
-if [ ! -f "${VENV}/bin/python3" ] || ! "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+_triton_ready=false
+
+if [ -f "${VENV}/bin/python3" ] && "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+    _triton_ready=true
+else
     echo "  Setting up Triton venv at ${VENV} ..."
-    python3 -m venv --system-site-packages "${VENV}"
-    # cu121 wheel is compatible with CUDA 12.x runtime
-    "${VENV}/bin/pip" install --quiet \
-        triton \
-        torch --index-url https://download.pytorch.org/whl/cu121 \
-        || echo "  [warn] pip install incomplete — Triton benchmarks may be skipped"
+    # --clear wipes any broken state from previous attempts (e.g. cross-node
+    # Python version mismatch when T4 and H100 jobs ran concurrently).
+    python3 -m venv --clear --system-site-packages "${VENV}" \
+        && "${VENV}/bin/pip" install --quiet \
+               triton torch --index-url https://download.pytorch.org/whl/cu121 \
+        && _triton_ready=true \
+        || echo "  [warn] Triton venv setup failed — skipping Triton benchmarks"
 fi
 
-if "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+if $_triton_ready; then
     for SIZE in "${SIZES[@]}"; do
         echo "--- GEMM triton  M=N=K=${SIZE} ---"
         srun "${VENV}/bin/python3" "${REPO_ROOT}/scripts/bench_gemm_triton.py" \

@@ -74,16 +74,20 @@ done
 echo ""
 echo "=== GEMM Benchmarks — Triton V5 (T4) ==="
 VENV="${REPO_ROOT}/.venv_triton"
-if [ ! -f "${VENV}/bin/python3" ] || ! "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+_triton_ready=false
+
+if [ -f "${VENV}/bin/python3" ] && "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+    _triton_ready=true
+else
     echo "  Setting up Triton venv at ${VENV} ..."
-    python3 -m venv --system-site-packages "${VENV}"
-    "${VENV}/bin/pip" install --quiet \
-        triton \
-        torch --index-url https://download.pytorch.org/whl/cu121 \
-        || echo "  [warn] pip install incomplete — Triton benchmarks may be skipped"
+    python3 -m venv --clear --system-site-packages "${VENV}" \
+        && "${VENV}/bin/pip" install --quiet \
+               triton torch --index-url https://download.pytorch.org/whl/cu121 \
+        && _triton_ready=true \
+        || echo "  [warn] Triton venv setup failed — skipping Triton benchmarks"
 fi
 
-if "${VENV}/bin/python3" -c "import triton, torch" 2>/dev/null; then
+if $_triton_ready; then
     for SIZE in "${SIZES[@]}"; do
         echo "--- GEMM triton  M=N=K=${SIZE} ---"
         srun "${VENV}/bin/python3" "${REPO_ROOT}/scripts/bench_gemm_triton.py" \
