@@ -98,6 +98,14 @@ echo "=== ncu version ==="
 "${NCU}" --version | head -3
 echo ""
 
+# Quick capability check — ncu needs perf_event_paranoid <= 2 or CAP_SYS_ADMIN.
+# Run a trivial profile; if it errors we report clearly rather than silently skipping.
+echo "=== ncu capability check ==="
+"${NCU}" --metrics "sm__throughput.avg.pct_of_peak_sustained_elapsed" \
+    --csv --page raw \
+    /bin/true 2>&1 | head -5
+echo ""
+
 mkdir -p "${PROFILES_DIR}"
 
 # ── Metric set ────────────────────────────────────────────────────────────────
@@ -136,12 +144,10 @@ profile_kernel() {
     echo "--- ncu  ${workload} / ${impl}  M=${m} N=${n} K=${k} ---"
 
     # Run with warmup=0, iterations=1 so ncu captures exactly one kernel set.
-    # --target-processes all ensures ncu also profiles child processes (srun wrapper).
-    # 2>/dev/null suppresses ncu's ==PROF== chatter from the JSON output.
+    # stderr goes to stdout (2>&1) so ncu errors appear in the job log.
     "${NCU}" \
         --metrics "${NCU_METRICS}" \
         --csv --page raw \
-        --target-processes all \
         "${BENCH}" \
             --workload  "${workload}" \
             --implementation "${impl}" \
@@ -149,7 +155,7 @@ profile_kernel() {
             --dtype "${dtype}" \
             --warmup 0 --iterations 1 \
             --no-verify --no-save \
-    2>/dev/null \
+    2>&1 \
     | python3 "${PARSE}" \
         --workload  "${workload}" \
         --implementation "${impl}" \
