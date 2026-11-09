@@ -51,7 +51,7 @@ echo ""
 echo "=== GEMM Benchmarks (H100) ==="
 
 SIZES=(512 1024 2048 4096)
-IMPLS=(cuda_naive cuda_tiled cuda_tuned cuda_cutlass)
+IMPLS=(cuda_naive cuda_tiled cuda_tuned cuda_wmma cuda_cutlass)
 WARMUP=20
 ITERS=100
 

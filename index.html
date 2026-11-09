@@ -614,6 +614,7 @@
       <li><a href="#attention">Attention</a></li>
       <li><a href="#reduction">Reduction</a></li>
       <li><a href="#datamovement">Data Movement</a></li>
+      <li><a href="#platforms">T4 vs H100</a></li>
       <li><a href="#infrastructure">Infrastructure</a></li>
     </ul>
   </nav>
@@ -624,7 +625,7 @@
     <header class="hero" id="hero">
       <div class="hero-eyebrow">Performance Engineering</div>
       <h1>Kernel<span>X</span></h1>
-      <div class="hero-subtitle">GPU Kernel Performance Engineering on NVIDIA H100</div>
+      <div class="hero-subtitle">GPU Kernel Performance Engineering on NVIDIA H100 &amp; Tesla T4</div>
       <p class="hero-desc">
         A ground-up platform for benchmarking, profiling, and systematically optimizing CUDA kernels — built to answer: why is this kernel performing the way it is, and what change actually makes it faster?
       </p>
@@ -846,7 +847,7 @@
       <div class="section-label">Workload 1</div>
       <h2>GEMM — Matrix Multiplication</h2>
       <p>
-        General matrix multiplication (C = A × B, M=N=K, fp32) is the most compute-intensive primitive in deep learning. The progression from a naive global-memory kernel to CUTLASS TF32 Tensor Cores spans a 32.6× wall-clock improvement — each step motivated by a specific hardware constraint on the H100.
+        General matrix multiplication (C = A × B, M=N=K, fp32) is the most compute-intensive primitive in deep learning. Five implementations form a deliberate progression from a naive global-memory kernel through manual Tensor Core access (WMMA) to CUTLASS TF32 — a 32.6× wall-clock improvement on H100, each step motivated by a specific hardware constraint.
       </p>
 
       <div class="chart-wrap">
@@ -868,6 +869,7 @@
             <tr><td>cuda_naive</td><td>26.3 ms</td><td>5.2</td><td>1× baseline</td></tr>
             <tr><td>cuda_tiled</td><td>15.6 ms</td><td>8.8</td><td>1.7×</td></tr>
             <tr><td>cuda_tuned</td><td>6.5 ms</td><td>21.1</td><td>4.1×</td></tr>
+            <tr><td>cuda_wmma</td><td>—</td><td>—</td><td>benchmark pending</td></tr>
             <tr><td>Triton</td><td>0.99 ms</td><td>139.5</td><td>26.8×</td></tr>
             <tr class="best"><td>CUTLASS</td><td>0.81 ms</td><td>169.3</td><td>32.6×</td></tr>
           </tbody>
@@ -894,6 +896,13 @@
           <div>
             <p style="margin-bottom: 6px;">Register-blocked accumulator (8×8 per thread), <code>float4</code> vectorized loads, fully unrolled inner loop. 4.1× speedup.</p>
             <p style="font-size: 12px; color: var(--green); margin: 0;"><strong>Roofline:</strong> <em>compute-bound</em> — AI crosses the ridge point. FP32 FMA utilisation ≈ 35–40% of peak. Memory is no longer the ceiling.</p>
+          </div>
+        </div>
+        <div class="insight-card">
+          <span class="badge">WMMA</span>
+          <div>
+            <p style="margin-bottom: 6px;">Manual Tensor Core access via <code>nvcuda::wmma</code>. FP16 inputs, FP32 accumulator. Each warp owns 2×2 fragments (32×32 output), dispatched with <code>mma_sync</code>. Benchmark in progress — this implementation exposes the gap between <em>accessing</em> Tensor Cores and <em>saturating</em> them.</p>
+            <p style="font-size: 12px; color: var(--orange); margin: 0;"><strong>Roofline:</strong> aimed at the Tensor Core ceiling — but without <code>cp.async</code> double-buffering, long-scoreboard stalls from the synchronous global→shared load will prevent full utilisation. The gap to CUTLASS measures exactly the value of software pipelining.</p>
           </div>
         </div>
         <div class="insight-card">
@@ -1076,6 +1085,121 @@
       </div>
     </section>
 
+    <!-- PLATFORM COMPARISON -->
+    <section id="platforms">
+      <div class="section-label">Multi-GPU Analysis</div>
+      <h2>Platform Comparison — Tesla T4 vs H100</h2>
+      <p>
+        All workloads run on both ROSIE GPUs. The Tesla T4 (Turing, sm_75, 320 GB/s HBM2) and H100 (Hopper, sm_90, 3,350 GB/s HBM3) differ in raw throughput by roughly 10×, but the degree to which algorithmic improvements translate into measured speedup varies dramatically across implementations. Comparing the same code on two architectures reveals where hardware amplifies — or constrains — software optimization.
+      </p>
+
+      <h3 style="margin-top: 32px; margin-bottom: 16px;">Hardware Specifications</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Attribute</th>
+              <th>Tesla T4</th>
+              <th>NVIDIA H100 80GB</th>
+              <th>Ratio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Architecture</td><td>Turing (sm_75)</td><td>Hopper (sm_90)</td><td>—</td></tr>
+            <tr><td>FP32 peak</td><td>8.1 TFLOP/s</td><td>60 TFLOP/s</td><td>7.4×</td></tr>
+            <tr><td>Tensor Core peak (TF32/TF16)</td><td>65 TFLOP/s (INT8)</td><td>989 TFLOP/s (TF32)</td><td>15×</td></tr>
+            <tr><td>HBM bandwidth</td><td>320 GB/s</td><td>3,350 GB/s</td><td>10.5×</td></tr>
+            <tr><td>L2 cache</td><td>4 MB</td><td>50 MB</td><td>12.5×</td></tr>
+            <tr><td>SMs</td><td>40</td><td>132</td><td>3.3×</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top: 40px; margin-bottom: 16px;">GEMM — Algorithmic Improvements Scale Differently</h3>
+      <p>
+        GEMM is measured on both platforms at N=1024 (the largest size available on T4). The key observation: hand-written CUDA kernels (naive → tuned) produce similar absolute speedups (~6× on both platforms), but Triton and CUTLASS show a 10× H100 advantage because they target Tensor Cores — TF32 on H100 vs SIMT-FP32 on T4.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Implementation</th>
+              <th>T4 (TFLOP/s)</th>
+              <th>H100 (TFLOP/s)</th>
+              <th>H100 / T4</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>cuda_naive</td><td>0.51</td><td>5.11</td><td>10.0×</td><td>Memory-bound on both; gap ≈ bandwidth ratio</td></tr>
+            <tr><td>cuda_tiled</td><td>0.95</td><td>8.87</td><td>9.3×</td><td>L2 reuse improves both proportionally</td></tr>
+            <tr><td>cuda_tuned</td><td>2.96</td><td>18.5</td><td>6.3×</td><td>Register blocking helps T4 disproportionately</td></tr>
+            <tr><td>Triton</td><td>4.97</td><td>49.7</td><td>10.0×</td><td>Autotuner exploits TF32 on H100, SIMT on T4</td></tr>
+            <tr class="best"><td>CUTLASS</td><td>6.13</td><td>59.6</td><td>9.7×</td><td>TF32 Tensor Cores on H100; SIMT path on T4</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout" style="margin-top: 20px;">
+        <h4>Why the Speedup Gap Widens at N=4096</h4>
+        <p style="margin-bottom: 8px;">
+          At N=4096 (H100 only), CUTLASS reaches 169 TFLOP/s — a 32.6× speedup over cuda_naive. On T4, the same code progression peaks at ~12× at N=1024 because T4 uses CUTLASS's FP32 SIMT path (no TF32 Tensor Cores). The H100 TF32 path operates on a fundamentally higher compute ceiling: 989 vs 60 TFLOP/s. The implication: writing a good tiled CUDA kernel captures most of T4's compute budget; the same kernel on H100 leaves ~93% of peak untouched.
+        </p>
+        <p style="margin: 0;">
+          This is why production training frameworks (PyTorch, JAX) use cuBLAS/CUTLASS rather than hand-written GEMM even when the hand-written kernel "looks fast" — the gap only manifests at Ampere/Hopper scale, and only if the kernel is Tensor-Core-aware.
+        </p>
+      </div>
+
+      <h3 style="margin-top: 40px; margin-bottom: 16px;">FlashAttention — Bandwidth Determines the Benefit</h3>
+      <p>
+        FlashAttention rewrites the attention computation to avoid materializing the N×N attention matrix in HBM — replacing O(N²) HBM reads/writes with O(N) on-chip SRAM passes. How much that matters depends entirely on HBM bandwidth.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Implementation</th>
+              <th>T4 TFLOP/s<br><span style="font-weight:400;font-size:11px;">(N=2048, D=64)</span></th>
+              <th>H100 TFLOP/s<br><span style="font-weight:400;font-size:11px;">(N=2048, D=64)</span></th>
+              <th>Algorithm speedup</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>cuda_naive</td><td>0.108</td><td>0.851</td><td>T4: 1× · H100: 1× (baseline)</td></tr>
+            <tr class="best"><td>cuda_flash</td><td>0.856</td><td>3.456</td><td>T4: <strong>7.9×</strong> · H100: <strong>4.1×</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout" style="margin-top: 20px;">
+        <h4>FlashAttention Is More Impactful on T4 Than H100</h4>
+        <p style="margin-bottom: 8px;">
+          FlashAttention delivers a 7.9× speedup on T4 but only 4.1× on H100 — the lower-bandwidth GPU benefits more from the algorithm that eliminates HBM traffic. On T4 (320 GB/s), the O(N²) matrix materialize in the naive kernel saturates memory bandwidth; FlashAttention's O(N) HBM traffic frees the bottleneck. On H100 (3,350 GB/s), the naive kernel is less bottlenecked, so the same algorithmic savings produce a smaller relative gain.
+        </p>
+        <p style="margin: 0;">
+          The practical implication: FlashAttention matters on <em>every</em> GPU but provides the largest absolute wall-clock savings on memory-bandwidth-limited hardware. As sequence lengths grow, the O(N²) penalty re-appears even on H100 — which is why FlashAttention is standard regardless of GPU generation.
+        </p>
+      </div>
+
+      <h3 style="margin-top: 40px; margin-bottom: 16px;">Summary: What Changes Between GPU Generations</h3>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 12px;">
+        <div class="card">
+          <h3 style="font-size: 13px; margin-bottom: 8px; color: var(--accent);">Compute-bound workloads</h3>
+          <p style="font-size: 12px; margin: 0; line-height: 1.65;">GEMM with CUTLASS/Triton: ~10× improvement. Tensor Core throughput scales 15×, but the gap is partially offset by occupancy and pipeline differences.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 13px; margin-bottom: 8px; color: var(--accent);">Memory-bound workloads</h3>
+          <p style="font-size: 12px; margin: 0; line-height: 1.65;">Softmax, LayerNorm, Reduction: ~10× improvement proportional to HBM bandwidth ratio (3350 / 320 GB/s ≈ 10.5×). Algorithm improvements scale the same on both.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 13px; margin-bottom: 8px; color: var(--accent);">Algorithm-sensitive workloads</h3>
+          <p style="font-size: 12px; margin: 0; line-height: 1.65;">FlashAttention: larger relative gain on T4 because the HBM bottleneck is more severe. The right algorithm matters more when the hardware has less bandwidth headroom.</p>
+        </div>
+      </div>
+    </section>
+
     <!-- INFRASTRUCTURE -->
     <section id="infrastructure">
       <div class="section-label">Engineering Infrastructure</div>
@@ -1212,7 +1336,7 @@
 <footer>
   <div class="footer-left">
     <span class="footer-name">Alex Boye</span>
-    <span class="footer-hw">Built on MSOE ROSIE — NVIDIA H100 80GB HBM3</span>
+    <span class="footer-hw">MSOE ROSIE — NVIDIA H100 80GB HBM3 &amp; Tesla T4</span>
   </div>
   <a href="https://github.com/boyea/KernelX" target="_blank" rel="noopener">
     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

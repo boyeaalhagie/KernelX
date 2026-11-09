@@ -5,6 +5,7 @@
 #include "workloads/gemm/impl/cuda_tiled.hpp"
 #include "workloads/gemm/impl/cuda_cutlass.hpp"
 #include "workloads/gemm/impl/cuda_tuned.hpp"
+#include "workloads/gemm/impl/cuda_wmma.hpp"
 #include "workloads/softmax/impl/cpu_reference.hpp"
 #include "workloads/softmax/impl/cuda_naive.hpp"
 #include "workloads/softmax/impl/cuda_online.hpp"
@@ -128,6 +129,7 @@ static std::unique_ptr<kernelx::Workload> make_workload(
         if (impl == "cuda_naive")    return std::make_unique<kernelx::GemmCudaNaive>();
         if (impl == "cuda_tiled")    return std::make_unique<kernelx::GemmCudaTiled>();
         if (impl == "cuda_tuned")    return std::make_unique<kernelx::GemmCudaTuned>();
+        if (impl == "cuda_wmma")     return std::make_unique<kernelx::GemmCudaWmma>();
         if (impl == "cuda_cutlass")  return std::make_unique<kernelx::GemmCudaCutlass>();
         throw std::invalid_argument("unknown GEMM implementation: '" + impl + "'");
     }

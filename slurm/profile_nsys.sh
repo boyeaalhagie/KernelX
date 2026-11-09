@@ -112,6 +112,7 @@ echo "=== Profiling GEMM (N=4096) ==="
 profile_kernel gemm cuda_naive   4096 4096 4096
 profile_kernel gemm cuda_tiled   4096 4096 4096
 profile_kernel gemm cuda_tuned   4096 4096 4096
+profile_kernel gemm cuda_wmma    4096 4096 4096
 profile_kernel gemm cuda_cutlass 4096 4096 4096
 
 # ─────────────────────────────────────────────────────────────────────────────
