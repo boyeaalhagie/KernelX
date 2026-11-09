@@ -11,6 +11,9 @@
 #include "workloads/layernorm/impl/cpu_reference.hpp"
 #include "workloads/layernorm/impl/cuda_naive.hpp"
 #include "workloads/layernorm/impl/cuda_welford.hpp"
+#include "workloads/attention/impl/cpu_reference.hpp"
+#include "workloads/attention/impl/cuda_naive.hpp"
+#include "workloads/attention/impl/cuda_flash.hpp"
 #include "workloads/workload.hpp"
 
 #include <iostream>
@@ -60,7 +63,10 @@ static void print_usage(const char* prog) {
         "  softmax   / cuda_online\n"
         "  layernorm / cpu_reference\n"
         "  layernorm / cuda_naive\n"
-        "  layernorm / cuda_welford\n\n"
+        "  layernorm / cuda_welford\n"
+        "  attention / cpu_reference\n"
+        "  attention / cuda_naive\n"
+        "  attention / cuda_flash\n\n"
         "Example:\n"
         "  ./bench --workload gemm --implementation cuda_naive \\\n"
         "          --m 4096 --n 4096 --k 4096 --dtype fp32   \\\n"
@@ -120,6 +126,12 @@ static std::unique_ptr<kernelx::Workload> make_workload(
         if (impl == "cuda_naive")    return std::make_unique<kernelx::LayerNormCudaNaive>();
         if (impl == "cuda_welford")  return std::make_unique<kernelx::LayerNormCudaWelford>();
         throw std::invalid_argument("unknown layernorm implementation: '" + impl + "'");
+    }
+    if (workload == "attention") {
+        if (impl == "cpu_reference") return std::make_unique<kernelx::AttentionCpuReference>();
+        if (impl == "cuda_naive")    return std::make_unique<kernelx::AttentionCudaNaive>();
+        if (impl == "cuda_flash")    return std::make_unique<kernelx::AttentionCudaFlash>();
+        throw std::invalid_argument("unknown attention implementation: '" + impl + "'");
     }
     throw std::invalid_argument("unknown workload: '" + workload + "'");
 }

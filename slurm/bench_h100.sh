@@ -110,6 +110,26 @@ for N_SIZE in "${SOFTMAX_SIZES[@]}"; do
 done
 
 echo ""
+echo "=== Attention Benchmarks (H100) ==="
+# N = sequence length; D = head dimension (fixed at 64, typical for multi-head attention)
+ATTN_N_SIZES=(512 1024 2048 4096)
+ATTN_IMPLS=(cuda_naive cuda_flash)
+
+for N_SIZE in "${ATTN_N_SIZES[@]}"; do
+    for IMPL in "${ATTN_IMPLS[@]}"; do
+        echo "--- Attention ${IMPL}  N=${N_SIZE} D=64 ---"
+        srun "${BENCH}" \
+            --workload attention \
+            --implementation "${IMPL}" \
+            --m "${N_SIZE}" --n 64 --k 1 \
+            --dtype fp32 \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify
+    done
+done
+
+echo ""
 echo "=== GEMM Benchmarks — Triton V5 (H100) ==="
 # Triton needs PyTorch.  Set up a venv on first run; reuse on subsequent runs.
 # --system-site-packages picks up any cluster-wide torch/triton if present.
