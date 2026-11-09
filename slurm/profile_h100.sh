@@ -144,10 +144,13 @@ profile_kernel() {
     echo "--- ncu  ${workload} / ${impl}  M=${m} N=${n} K=${k} ---"
 
     # Run with warmup=0, iterations=1 so ncu captures exactly one kernel set.
+    # --target-processes all is required because SLURM runs bench as a child
+    # process of the job script shell.
     # stderr goes to stdout (2>&1) so ncu errors appear in the job log.
     "${NCU}" \
         --metrics "${NCU_METRICS}" \
         --csv --page raw \
+        --target-processes all \
         "${BENCH}" \
             --workload  "${workload}" \
             --implementation "${impl}" \
