@@ -37,6 +37,10 @@ date
 echo ""
 
 echo "=== Build ==="
+# Remove stale CMake cache — prevents old source-file lists from persisting
+# when CMakeLists.txt changes (e.g. adding per-arch source restrictions).
+rm -f "${BUILD_DIR}/CMakeCache.txt"
+rm -rf "${BUILD_DIR}/CMakeFiles"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 cmake "${REPO_ROOT}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=90
