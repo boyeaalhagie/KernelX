@@ -180,6 +180,38 @@ _INSIGHTS: dict[tuple, dict] = {
             "heads across the batch dimension for better SM utilisation."
         ),
     },
+    ("reduction", "cuda_naive"): {
+        "observed": (
+            "Shared-memory tree reduction: 8 __syncthreads() barriers per row for "
+            "kBlockDim=256.  At large N (≥4096) the kernel is HBM-bandwidth-bound "
+            "(AI ≈ 0.25 FLOP/byte vs H100 ridge 17.9): barrier overhead is "
+            "amortised over many DRAM loads and both implementations are equal.  "
+            "At N=256 the row fits in L2 and the 8-barrier tree dominates latency."
+        ),
+        "next": (
+            "cuda_warp: replace the 5 intra-warp barrier steps with __shfl_down_sync "
+            "butterfly — only 1 __syncthreads() remains (inter-warp partial sums).  "
+            "At small N the warp kernel is 1.5–2× faster; at large N both are "
+            "HBM-bound and performance converges."
+        ),
+    },
+    ("reduction", "cuda_warp"): {
+        "observed": (
+            "Warp-shuffle reduction: 5 __shfl_down_sync steps (no barrier) reduce "
+            "each warp to a partial sum; 1 __syncthreads() synchronises the 8 "
+            "partial sums; warp 0 finishes with another 3-step butterfly.  "
+            "At N≥4096 stall_long_scoreboard dominates (HBM latency), identical "
+            "to the naive version — confirming the memory-bound ceiling.  "
+            "Stall_math_pipe_throttle is effectively zero: 0.25 FLOP/byte keeps "
+            "the compute pipes idle > 90% of the time."
+        ),
+        "next": (
+            "To exceed HBM bandwidth, fuse reduction with an adjacent operator "
+            "(e.g. layer-norm mean + variance in a single pass, or "
+            "attention score max + sum online).  Fusion hides reduction latency "
+            "inside a compute-heavier pass, raising the effective AI."
+        ),
+    },
 }
 
 

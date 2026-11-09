@@ -14,6 +14,9 @@
 #include "workloads/attention/impl/cpu_reference.hpp"
 #include "workloads/attention/impl/cuda_naive.hpp"
 #include "workloads/attention/impl/cuda_flash.hpp"
+#include "workloads/reduction/impl/cpu_reference.hpp"
+#include "workloads/reduction/impl/cuda_naive.hpp"
+#include "workloads/reduction/impl/cuda_warp.hpp"
 #include "workloads/workload.hpp"
 
 #include <iostream>
@@ -64,9 +67,12 @@ static void print_usage(const char* prog) {
         "  layernorm / cpu_reference\n"
         "  layernorm / cuda_naive\n"
         "  layernorm / cuda_welford\n"
-        "  attention / cpu_reference\n"
-        "  attention / cuda_naive\n"
-        "  attention / cuda_flash\n\n"
+        "  attention  / cpu_reference\n"
+        "  attention  / cuda_naive\n"
+        "  attention  / cuda_flash\n"
+        "  reduction  / cpu_reference\n"
+        "  reduction  / cuda_naive\n"
+        "  reduction  / cuda_warp\n\n"
         "Example:\n"
         "  ./bench --workload gemm --implementation cuda_naive \\\n"
         "          --m 4096 --n 4096 --k 4096 --dtype fp32   \\\n"
@@ -132,6 +138,12 @@ static std::unique_ptr<kernelx::Workload> make_workload(
         if (impl == "cuda_naive")    return std::make_unique<kernelx::AttentionCudaNaive>();
         if (impl == "cuda_flash")    return std::make_unique<kernelx::AttentionCudaFlash>();
         throw std::invalid_argument("unknown attention implementation: '" + impl + "'");
+    }
+    if (workload == "reduction") {
+        if (impl == "cpu_reference") return std::make_unique<kernelx::ReductionCpuReference>();
+        if (impl == "cuda_naive")    return std::make_unique<kernelx::ReductionCudaNaive>();
+        if (impl == "cuda_warp")     return std::make_unique<kernelx::ReductionCudaWarp>();
+        throw std::invalid_argument("unknown reduction implementation: '" + impl + "'");
     }
     throw std::invalid_argument("unknown workload: '" + workload + "'");
 }

@@ -69,6 +69,10 @@ set(KERNELX_SOURCES
     src/workloads/attention/impl/cpu_reference.cpp
     src/workloads/attention/impl/cuda_naive.cu
     src/workloads/attention/impl/cuda_flash.cu
+    src/workloads/reduction/reduction_workload.cpp
+    src/workloads/reduction/impl/cpu_reference.cpp
+    src/workloads/reduction/impl/cuda_naive.cu
+    src/workloads/reduction/impl/cuda_warp.cu
 )
 
 # ── CUTLASS TF32 Tensor Core path (sm_80+ only) ───────────────────────────────

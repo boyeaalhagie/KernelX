@@ -160,6 +160,15 @@ echo "=== Profiling Attention (N=2048, D=64) ==="
 profile_kernel attention cuda_naive 2048 64 1
 profile_kernel attention cuda_flash 2048 64 1
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Reduction — N=4096 (HBM-bound) and N=256 (shows barrier-overhead regime)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "=== Profiling Reduction ==="
+profile_kernel reduction cuda_naive  1024  256 1
+profile_kernel reduction cuda_warp   1024  256 1
+profile_kernel reduction cuda_naive  1024 4096 1
+profile_kernel reduction cuda_warp   1024 4096 1
+
 echo "=== Done ==="
 date
 echo "Profile records written to ${PROFILES_DIR}/ncu_records.jsonl"

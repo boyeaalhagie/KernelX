@@ -129,6 +129,25 @@ for N_SIZE in "${ATTN_N_SIZES[@]}"; do
 done
 
 echo ""
+echo "=== Reduction Benchmarks (T4) ==="
+RED_N_SIZES=(256 1024 4096 16384 65536)
+RED_IMPLS=(cuda_naive cuda_warp)
+
+for N_SIZE in "${RED_N_SIZES[@]}"; do
+    for IMPL in "${RED_IMPLS[@]}"; do
+        echo "--- Reduction ${IMPL}  M=1024 N=${N_SIZE} ---"
+        srun "${BENCH}" \
+            --workload reduction \
+            --implementation "${IMPL}" \
+            --m 1024 --n "${N_SIZE}" --k 1 \
+            --dtype fp32 \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify
+    done
+done
+
+echo ""
 echo "=== GEMM Benchmarks — Triton V5 (T4) ==="
 VENV="${REPO_ROOT}/.venv_triton"
 _triton_ready=false

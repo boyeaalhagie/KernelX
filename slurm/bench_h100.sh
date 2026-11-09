@@ -164,6 +164,28 @@ else
 fi
 
 echo ""
+echo "=== Reduction Benchmarks (H100) ==="
+# M=1024 rows; N = row length spanning cache-resident (256) → HBM-bound (131072).
+# At N=256 the row fits in L2; synchronisation overhead is visible.
+# At N≥4096 both kernels are HBM-bandwidth-limited: AI ≈ 0.25 FLOP/byte.
+RED_N_SIZES=(256 1024 4096 16384 65536 131072)
+RED_IMPLS=(cuda_naive cuda_warp)
+
+for N_SIZE in "${RED_N_SIZES[@]}"; do
+    for IMPL in "${RED_IMPLS[@]}"; do
+        echo "--- Reduction ${IMPL}  M=1024 N=${N_SIZE} ---"
+        srun "${BENCH}" \
+            --workload reduction \
+            --implementation "${IMPL}" \
+            --m 1024 --n "${N_SIZE}" --k 1 \
+            --dtype fp32 \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify
+    done
+done
+
+echo ""
 echo "=== Done ==="
 date
 echo "Results written to ${REPO_ROOT}/results/experiments.jsonl"
