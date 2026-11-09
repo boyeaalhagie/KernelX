@@ -1,12 +1,34 @@
+# ── Build artifacts ───────────────────────────────────────────────────────────
 build/
 build_*/
+compile_commands.json
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
 third_party/
+.venv_triton/
+
+# ── Experiment outputs (runtime-generated) ───────────────────────────────────
 results/*.jsonl
 results/*.csv
+results/plots/
+profiles/
+
+# ── SLURM outputs ─────────────────────────────────────────────────────────────
 *.out
 *.err
+
+# ── Internal / personal notes ─────────────────────────────────────────────────
+rosie.md
+*.pdf
+
+# ── Containers ────────────────────────────────────────────────────────────────
 *.sif
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
+.python-version
+
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
-compile_commands.json
+Thumbs.db

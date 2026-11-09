@@ -20,7 +20,7 @@
 #SBATCH --job-name="kx_nsys"
 #SBATCH --output=profile_nsys_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=boyea@ad.msoe.edu
+#SBATCH --mail-user=your_username@your_institution.edu
 #SBATCH --partition=dgxh100
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:h100:1

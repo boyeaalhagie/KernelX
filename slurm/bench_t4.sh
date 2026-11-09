@@ -7,14 +7,14 @@
 # Memory bandwidth:     ~300 GB/s      (vs V100: ~900, H100: ~3350)
 #
 # Submit:   sbatch slurm/bench_t4.sh
-# Monitor:  squeue -u boyea@ad.msoe.edu
+# Monitor:  squeue -u your_username@your_institution.edu
 # Output:   tail -f job_<JOBID>.out
 # ─────────────────────────────────────────────────────────────────────────────
 
 #SBATCH --job-name="kernelx_bench_t4"
 #SBATCH --output=job_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=boyea@ad.msoe.edu
+#SBATCH --mail-user=your_username@your_institution.edu
 #SBATCH --partition=teaching
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:t4:1

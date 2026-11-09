@@ -1,17 +1,39 @@
 # KernelX
 
-**Kernel Performance Engineering Suite** — a GPU benchmarking, profiling, and optimization platform for NVIDIA hardware.
+**GPU Kernel Performance Engineering Platform** — a benchmarking, profiling, and optimization framework for CUDA kernels on NVIDIA hardware.
 
-## What this is
+## The question this project answers
 
-KernelX answers two questions for any GPU workload:
+> **Why is this kernel performing the way it is, and what change actually makes it faster?**
 
-> **Why is this kernel performing the way it is?**
-> **What change actually makes it faster?**
+KernelX is not a collection of CUDA programs. It is a performance engineering system: given a workload, it establishes a reproducible baseline, profiles with Nsight Systems, identifies the hardware bottleneck, implements optimized variants, and quantitatively measures the result. The goal is the explanation, not the fastest number.
 
-It is structured as a performance engineering platform, not a collection of CUDA programs. Given a workload, KernelX establishes a reproducible baseline, profiles execution with Nsight Compute and Nsight Systems, identifies the limiting hardware resource through Speed-of-Light and Roofline analysis, implements optimized variants, and quantitatively evaluates the result.
+---
 
-The goal is not the fastest number. It is the explanation.
+## Results
+
+All benchmarks run on NVIDIA H100 80GB HBM3 (Hopper, sm_90) and Tesla T4 (Turing, sm_75) on MSOE ROSIE HPC.
+
+### GEMM — M=N=K=4096, fp32
+
+| Implementation | Kernel time | TFLOP/s | Speedup | What changes |
+|---|---|---|---|---|
+| `cuda_naive` | 26.4 ms | 5.2 | 1× | Global memory only — L2 miss-dominated |
+| `cuda_tiled` | 15.6 ms | 8.8 | 1.7× | Shared-memory tiling — 32× data reuse per tile |
+| `cuda_tuned` | 6.5 ms | 21.1 | 4.1× | Register blocking — eliminates redundant smem reads |
+| `cuda_wmma` | 4.9 ms | 27.9 | 5.4× | Manual Tensor Core access via `nvcuda::wmma` (fp16) |
+| Triton | 1.0 ms | 139.5 | 26.8× | Python DSL autotuner — 82% of CUTLASS |
+| **CUTLASS** | **0.81 ms** | **169.3** | **32.6×** | TF32 Tensor Cores + `cp.async` double-buffering |
+
+### Other workloads
+
+| Workload | Implementations | Key result |
+|---|---|---|
+| Softmax | naive → online (1-pass) | 300× improvement — numerically stable and faster |
+| LayerNorm | naive → Welford | 180× — fused single-pass eliminates 2 HBM passes |
+| Attention | naive → FlashAttention (fp32, fp16) | 7.9× on T4, 4.1× on H100 — HBM bandwidth changes the benefit |
+| Reduction | naive → warp shuffle | HBM-bound at N≥4096; warp shuffles eliminate atomic contention |
+| Data Movement | pageable → pinned → bidirectional | 5.6× pageable→pinned; 86.8 GB/s bidirectional |
 
 ---
 
@@ -19,199 +41,140 @@ The goal is not the fastest number. It is the explanation.
 
 ```
 KernelX/
-├── include/
-│   ├── benchmark/          # BenchmarkRunner, ExperimentRecord
-│   ├── workloads/          # Workload interface + per-workload headers
-│   │   └── gemm/impl/      # cpu_reference, cuda_naive, ...
-│   └── utils/              # CUDA error checking, device queries
+├── include/workloads/          # Workload base + per-impl headers (fully documented)
 ├── src/
-│   ├── main.cpp            # bench CLI entry point
-│   ├── benchmark/          # runner.cpp, record.cpp
-│   └── workloads/gemm/     # gemm_workload.cpp + impl/*.cu
-├── results/                # Canonical JSONL experiment records
+│   ├── main.cpp                # bench CLI — single binary, --implementation flag selects kernel
+│   ├── benchmark/              # CUDA-event timing, JSONL record serialisation
+│   └── workloads/              # 6 workloads × N implementations
+│       ├── gemm/impl/          # cuda_naive, cuda_tiled, cuda_tuned, cuda_wmma, cuda_cutlass
+│       ├── softmax/impl/       # cuda_naive, cuda_online
+│       ├── layernorm/impl/     # cuda_naive, cuda_welford
+│       ├── attention/impl/     # cuda_naive, cuda_flash, cuda_flash_fp16
+│       ├── reduction/impl/     # cuda_naive, cuda_warp
+│       └── datamove/impl/      # pageable, pinned, pinned_async, bidirectional
 ├── scripts/
-│   ├── compare.py          # Side-by-side implementation comparison
-│   └── report.py           # Performance table + regression detection
-└── slurm/
-    └── bench_h100.sh       # ROSIE H100 job template
+│   ├── analyze.py              # Benchmark + nsys report for any workload
+│   ├── plot.py                 # Throughput charts → results/plots/
+│   ├── parse_nsys.py           # Parses nsys --stats=true tables → JSONL
+│   └── bench_gemm_triton.py    # Triton GEMM autotuner
+├── slurm/
+│   ├── bench_h100.sh           # Full benchmark suite — H100 (sm_90)
+│   ├── bench_t4.sh             # Full benchmark suite — T4 (sm_75)
+│   ├── profile_nsys.sh         # Nsight Systems sweep — all workloads
+│   └── diag_*.sh               # Environment diagnostics
+└── results/
+    └── experiments.jsonl       # Canonical records (gitignored — generated at runtime)
 ```
 
-The four project layers map directly to this structure:
-
-| Layer | Location |
-|-------|----------|
-| Workloads | `src/workloads/` |
-| Implementations | `src/workloads/*/impl/` |
-| Performance analysis | Nsight Compute / Systems (profiling scripts TBD) |
-| Engineering infrastructure | `src/benchmark/`, `scripts/`, `slurm/`, `results/` |
-
 ---
 
-## Workload / Implementation Matrix
+## Quick start
 
-| Workload | Implementation | Status | Notes |
-|----------|---------------|--------|-------|
-| GEMM | `cpu_reference` | ✓ | Correctness baseline; ikj loop order |
-| GEMM | `cuda_naive` | ✓ | V1: one thread per element, global memory only |
-| GEMM | `cuda_tiled` | ✓ | V2: shared-memory tiling, TILE=32 |
-| GEMM | `cuda_tuned` | ✓ | V3: register blocking, BM=BN=64 BK=8 TM=TN=4 |
-| GEMM | `cuda_cutlass` | ✓ | V4: CUTLASS device Gemm; GemmSimt on sm_75, GemmTF32 (TF32 TC) on sm_80+ |
-| GEMM | `triton` | Planned | V5: Triton kernel, comparison vs CUDA |
-| Softmax | `cpu_reference` | Planned | Numerically stable (online algorithm) |
-| Softmax | `cuda_online` | Planned | Single-pass online softmax |
-| LayerNorm | `cpu_reference` | Planned | |
-| LayerNorm | `cuda_fused` | Planned | Fused mean/var/norm pass |
-| Attention | `cuda_unfused` | Planned | QK^T → Softmax → V, unfused |
-| Attention | `cuda_fused` | Planned | FlashAttention-style tiling |
+### Prerequisites
 
----
+- CUDA Toolkit 11.8+ (12.x recommended)
+- CMake 3.18+
+- GCC 9+ or Clang 10+ (C++17)
+- Python 3.9+ (stdlib only — no pip installs needed for `analyze.py`)
 
-## Quick Start
+### Clone
 
 ```bash
-# Configure and build (Release with -lineinfo for Nsight source mapping)
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-cd ..
+git clone https://github.com/boyea/KernelX.git
+cd KernelX
 
-# GEMM — CPU reference (correctness baseline, small size)
-./build/bench --workload gemm --implementation cpu_reference \
-              --m 512 --n 512 --k 512
+# CUTLASS headers (header-only, sparse clone — ~30 MB)
+git clone --depth 1 --branch v3.4.1 \
+          --filter=blob:none --sparse \
+          https://github.com/NVIDIA/cutlass.git third_party/cutlass
+cd third_party/cutlass && git sparse-checkout set include && cd ../..
+```
 
-# GEMM — naive CUDA (GPU baseline, full benchmark)
-./build/bench --workload gemm --implementation cuda_naive \
-              --m 4096 --n 4096 --k 4096 --dtype fp32 \
-              --warmup 20 --iterations 100
+### Build
 
-# Skip the CPU reference computation for large matrices
-./build/bench --workload gemm --implementation cuda_naive \
-              --m 4096 --n 4096 --k 4096 --no-verify
+Replace `XX` with your GPU's compute capability:
 
-# Compare two implementations
-python scripts/compare.py --a cpu_reference --b cuda_naive \
-                          --workload gemm --m 512 --n 512 --k 512
+| GPU | sm |
+|---|---|
+| H100, H200 | 90 |
+| A100, A6000 | 80 |
+| RTX 3090 | 86 |
+| RTX 4090 | 89 |
+| T4, RTX 2080 | 75 |
+| V100 | 70 |
+| GTX 1080 | 61 (no WMMA) |
 
-# Report all GEMM experiments
-python scripts/report.py --workload gemm
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=XX
+cmake --build build -j$(nproc)
+```
 
-# Regression detection (exit code 1 if any >5% slowdown)
-python scripts/report.py --workload gemm --regression-check
+### Run
+
+```bash
+# Single benchmark
+./build/bench --workload gemm --implementation cuda_tuned \
+              --m 4096 --n 4096 --k 4096 --warmup 20 --iterations 100
+
+# Full GEMM progression
+for IMPL in cuda_naive cuda_tiled cuda_tuned cuda_wmma cuda_cutlass; do
+  ./build/bench --workload gemm --implementation $IMPL \
+                --m 4096 --n 4096 --k 4096 --warmup 20 --iterations 100
+done
+
+# Analyze results
+python scripts/analyze.py --workload gemm
+```
+
+### On a SLURM cluster
+
+```bash
+# Edit the --mail-user line in slurm/*.sh to your email, then:
+sbatch slurm/bench_h100.sh      # full H100 suite
+sbatch slurm/bench_t4.sh        # full T4 suite
+sbatch slurm/profile_nsys.sh    # Nsight Systems profiling
 ```
 
 ---
 
-## Experiment Records
+## Experiment records
 
-Every run appends a canonical, machine-readable record to `results/experiments.jsonl`:
+Every run appends a machine-readable record to `results/experiments.jsonl`:
 
 ```json
 {
   "workload": "gemm",
-  "implementation": "cuda_naive",
+  "implementation": "cuda_tuned",
   "gpu": "NVIDIA H100 80GB HBM3",
   "dtype": "fp32",
   "m": 4096, "n": 4096, "k": 4096,
-  "cuda_version": "12.2",
-  "git_commit": "a3f9c1d",
-  "timestamp": "2024-10-20T14:32:01Z",
-  "median_ms": 8.21,
-  "mean_ms": 8.34,
-  "p95_ms": 9.10,
-  "stddev_ms": 0.42,
-  "tflops": 16.71,
+  "git_commit": "b6d74d3",
+  "timestamp": "2026-11-09T23:28:24Z",
+  "median_ms": 6.515,
+  "mean_ms": 6.521,
+  "p95_ms": 6.539,
+  "stddev_ms": 0.012,
+  "tflops_fp32": 21.096,
   "warmup_iters": 20,
   "timed_iters": 100,
   "verified": true
 }
 ```
 
-Records are immutable. Comparisons, regressions, and reports are all derived from this file — no manual spreadsheets.
-
-The JSONL format loads directly into pandas:
-
-```python
-import pandas as pd
-df = pd.read_json("results/experiments.jsonl", lines=True)
-```
+Records from every GPU accumulate in the same file and are filtered by `gpu` field for comparison.
 
 ---
 
-## Performance Analysis Approach
+## GPU compatibility
 
-Each kernel is investigated with three lenses, in order:
-
-### 1. Speed-of-Light
-Is the kernel compute-bound or memory-bound?
-Nsight Compute's `sm__throughput` and `l1tex__throughput` metrics show utilization as a percentage of peak. A kernel achieving 90% of memory bandwidth ceiling with 10% compute utilization is memory-bound — tiling is the right lever, not instruction-level optimizations.
-
-### 2. Roofline
-Where does the kernel sit on the performance / arithmetic-intensity plot relative to the ridge point?
-A GEMM with arithmetic intensity well below the ridge has room to improve through data reuse (shared memory, register blocking). Moving it rightward on the roofline is the optimization objective, not moving it upward arbitrarily.
-
-### 3. Memory Workload
-L1/L2 hit rates, global load efficiency, coalescing.
-Nsight Compute's Memory Workload Analysis section breaks down traffic per cache level. For `cuda_naive`, we expect near-zero L1 reuse and high L2 pressure — this hypothesis is confirmed, not assumed.
-
-The optimization hypothesis comes from measurement, not intuition.
+| Feature | Pascal (sm_61) | Volta (sm_70) | Turing (sm_75) | Ampere (sm_80+) | Hopper (sm_90) |
+|---|---|---|---|---|---|
+| All workloads except WMMA | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `cuda_wmma` (Tensor Cores) | — | ✓ | ✓ | ✓ | ✓ |
+| CUTLASS TF32 path | — | — | — | ✓ | ✓ |
 
 ---
 
-## Running on ROSIE (MSOE HPC)
+## Technology stack
 
-Three GPU generations are available, each with a dedicated job script:
-
-| Script | Partition | GPU | sm | FP32 Peak | Bandwidth |
-|--------|-----------|-----|----|-----------|-----------|
-| `slurm/bench_h100.sh` | `dgxh100` | H100 | 90 | ~60 TFLOP/s | ~3350 GB/s |
-| `slurm/bench_v100.sh` | `dgx` | V100 | 70 | ~14 TFLOP/s | ~900 GB/s |
-| `slurm/bench_t4.sh` | `teaching` | T4 | 75 | ~8 TFLOP/s | ~300 GB/s |
-
-```bash
-# Submit to all three (results accumulate in the same JSONL file)
-sbatch slurm/bench_h100.sh
-sbatch slurm/bench_v100.sh
-sbatch slurm/bench_t4.sh
-
-# Monitor
-squeue -u boyea@ad.msoe.edu
-
-# Live output
-tail -f job_<JOBID>.out
-
-# Cross-GPU comparison once results are in
-python scripts/gpu_compare.py --implementation cuda_naive --workload gemm
-```
-
-Because every record includes the `gpu` field, results from all three GPUs accumulate in the same `results/experiments.jsonl` and can be filtered or compared by device.
-
----
-
-## Technology Stack
-
-| Category | Technologies |
-|----------|-------------|
-| Kernel implementations | CUDA C++, CUTLASS 3.4.1, Triton (planned) |
-| Profiling | Nsight Compute, Nsight Systems |
-| Build | CMake 3.18+, CUDA Toolkit |
-| Analysis | Python, NumPy, Pandas, Matplotlib |
-| Infrastructure | Git, SLURM |
-| Cluster | MSOE ROSIE (H100 / V100 / T4 nodes) |
-
----
-
-## Timing Methodology
-
-GPU kernels are timed with CUDA events on the default stream:
-
-```
-cudaEventRecord(start)
-kernel<<<grid, block>>>(...)
-cudaEventRecord(stop)
-cudaEventSynchronize(stop)
-cudaEventElapsedTime(&ms, start, stop)
-```
-
-This measures device-side kernel time with ~0.5 µs resolution, independent of host-side scheduling jitter. CPU kernels use `std::chrono::high_resolution_clock`.
-
-The reported statistic is the **median** over all timed iterations, not the mean. The median is robust against outliers from OS preemptions, ECC scrubbing, or thermal throttling on early iterations — all common on shared HPC nodes.
+CUDA C++17, CUTLASS 3.4.1, Triton, CMake, Python, Nsight Systems, SLURM

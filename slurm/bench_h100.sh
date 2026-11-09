@@ -7,14 +7,14 @@
 # Memory bandwidth:     ~3350 GB/s (HBM3)
 #
 # Submit:   sbatch slurm/bench_h100.sh
-# Monitor:  squeue -u boyea@ad.msoe.edu
+# Monitor:  squeue -u your_username@your_institution.edu
 # Output:   tail -f job_<JOBID>.out
 # ─────────────────────────────────────────────────────────────────────────────
 
 #SBATCH --job-name="kernelx_bench"
 #SBATCH --output=job_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=boyea@ad.msoe.edu
+#SBATCH --mail-user=your_username@your_institution.edu
 #SBATCH --partition=dgxh100
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:h100:1

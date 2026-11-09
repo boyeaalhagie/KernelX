@@ -11,14 +11,14 @@
 #   singularity exec --nv -B /data:/data <image.sif> ./build.sh
 #
 # Submit:   sbatch slurm/bench_v100.sh
-# Monitor:  squeue -u boyea@ad.msoe.edu
+# Monitor:  squeue -u your_username@your_institution.edu
 # Output:   tail -f job_<JOBID>.out
 # ─────────────────────────────────────────────────────────────────────────────
 
 #SBATCH --job-name="kernelx_bench_v100"
 #SBATCH --output=job_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=boyea@ad.msoe.edu
+#SBATCH --mail-user=your_username@your_institution.edu
 #SBATCH --partition=dgx
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:v100:1
