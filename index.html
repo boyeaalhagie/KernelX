@@ -617,6 +617,7 @@
       <li><a href="#platforms">T4 vs H100</a></li>
       <li><a href="#infrastructure">Infrastructure</a></li>
       <li><a href="#quickstart">Run It</a></li>
+      <li><a href="#faq">FAQ</a></li>
     </ul>
   </nav>
 
@@ -1470,6 +1471,122 @@ tail -f job_&lt;JOBID&gt;.out</pre>
           Every run — regardless of GPU, workload, or engine — appends a JSON record to <code>results/experiments.jsonl</code> tagged with the GPU name, git commit, and timestamp. Run the same workload on a T4 today and an H100 tomorrow, then <code>python scripts/analyze.py --workload gemm</code> shows both side by side. No manual tracking.
         </p>
       </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq">
+      <div class="section-label">FAQ</div>
+      <h2>Frequently Asked Questions</h2>
+
+      <!-- HARDWARE & ENVIRONMENT -->
+      <h3 style="margin-top: 32px; margin-bottom: 20px; color: var(--muted); font-size: 12px; letter-spacing: 1px; text-transform: uppercase;">Hardware &amp; Environment</h3>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>What is ROSIE?</h4>
+        <p style="margin: 0;">
+          ROSIE (Research and Operational Systems for Innovation and Excellence) is MSOE's (Milwaukee School of Engineering) HPC cluster. It provides access to NVIDIA H100, A100, and T4 GPUs via SLURM job scheduling. All benchmarks in this project were run on ROSIE — the H100 partition (<code>dgxh100</code>) for primary results and the teaching partition for T4 comparison data. ROSIE is not publicly accessible; the SLURM scripts in this repo work on any SLURM cluster with CUDA-capable GPUs.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why H100?</h4>
+        <p style="margin-bottom: 8px;">
+          The H100 is the current standard platform for large-scale GPU compute — training LLMs, inference serving, scientific simulation. If you want to understand how production GPU software works, the H100 is the hardware that matters. It introduces several features not present in earlier architectures that are central to this project:
+        </p>
+        <ul style="font-size: 13px; line-height: 1.8; margin: 0; padding-left: 20px;">
+          <li><strong>TF32 Tensor Cores</strong> — 989 TFLOP/s peak, ~16× scalar FP32. The gap between cuda_tuned and CUTLASS only exists because of Tensor Cores.</li>
+          <li><strong>HBM3 at 3.35 TB/s</strong> — 10× more bandwidth than T4. Memory-bound kernels (softmax, layernorm, attention) scale almost linearly with this.</li>
+          <li><strong>cp.async (asynchronous copies)</strong> — the hardware instruction that enables CUTLASS's double-buffered pipeline. Not available on Turing.</li>
+          <li><strong>NVLink 4.0</strong> — relevant for multi-GPU workloads outside the scope of this project.</li>
+        </ul>
+      </div>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why also benchmark on T4?</h4>
+        <p style="margin: 0;">
+          A single-GPU benchmark only tells you what a kernel does on that hardware. Comparing the same code on T4 and H100 reveals which improvements are architecture-specific. The result is informative: naive CUDA kernels scale roughly 10× between T4 and H100 (proportional to bandwidth and FP32 throughput), but Triton and CUTLASS scale 28× because they exploit Tensor Cores that T4 lacks in the TF32 sense. FlashAttention provides a 7.9× speedup on T4 but only 4.1× on H100 — because the lower-bandwidth GPU benefits more from an algorithm that eliminates HBM traffic. That kind of hardware-algorithm interaction is invisible if you only have one GPU.
+        </p>
+      </div>
+
+      <!-- DESIGN DECISIONS -->
+      <h3 style="margin-top: 40px; margin-bottom: 20px; color: var(--muted); font-size: 12px; letter-spacing: 1px; text-transform: uppercase;">Design Decisions</h3>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why fp32 for GEMM instead of fp16 or bf16?</h4>
+        <p style="margin: 0;">
+          fp32 is the right format for isolating the memory hierarchy and compute bottlenecks this project studies. With fp16 or bf16, Tensor Core throughput is so dominant that the progression naive → tiled → tuned would all look identical — all bottlenecked on something other than what changes between them. fp32 spreads the implementations across a larger performance range (5–170 TFLOP/s), making each step's contribution visible. The cuda_wmma implementation deliberately introduces fp16 to show the Tensor Core on-ramp, and CUTLASS uses TF32 (10-bit mantissa, fp32 range) for production-grade throughput.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why these six workloads?</h4>
+        <p style="margin-bottom: 8px;">
+          They cover the full range of bottleneck types that appear in real GPU programs, without redundancy:
+        </p>
+        <ul style="font-size: 13px; line-height: 1.8; margin: 0; padding-left: 20px;">
+          <li><strong>GEMM</strong> — the dominant compute kernel in every neural network. Arithmetic intensity is high enough to be compute-bound with the right implementation.</li>
+          <li><strong>Softmax + LayerNorm</strong> — memory-bound, multi-pass problems. The key optimization is reducing HBM passes, not improving compute.</li>
+          <li><strong>Attention</strong> — quadratic memory growth problem. FlashAttention is an algorithmic rewrite, not a micro-optimization.</li>
+          <li><strong>Reduction</strong> — synchronization and warp-level communication. Neither compute nor bandwidth — the bottleneck is thread coordination.</li>
+          <li><strong>Data Movement</strong> — PCIe transfer behavior. A prerequisite for understanding end-to-end latency that most GPU tutorials skip entirely.</li>
+        </ul>
+      </div>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why CUTLASS instead of cuBLAS?</h4>
+        <p style="margin: 0;">
+          cuBLAS is a black box — it gives you a number but not an explanation. CUTLASS is open source, documented at the PTX level, and exposes the exact pipeline primitives (cp.async, ldmatrix, mma.sync) that make it fast. The goal of the GEMM progression is to understand what CUTLASS does, not just how fast it is. Using cuBLAS as the top-of-ladder baseline would leave the final step unexplained.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why use median timing instead of mean?</h4>
+        <p style="margin: 0;">
+          On a shared HPC cluster, individual iterations occasionally spike due to OS preemptions, ECC scrubbing, thermal events, or neighbour workloads. The mean is pulled upward by these outliers; the median is not. For 100 timed iterations, the median is stable to ±0.5% across repeated runs on the same hardware. Reporting the mean would give the impression of worse or more variable performance than actually exists. P95 is also reported as a bound on worst-case latency.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why verify only the top-left corner of C in GEMM?</h4>
+        <p style="margin: 0;">
+          A full CPU reference for a 4096×4096×4096 GEMM takes roughly 20–30 minutes on a single core. The top-left 64×64 corner requires &lt;1 ms and is sufficient to catch all practical bugs: wrong indexing, transposed strides, sign errors, accumulation overflow. Any kernel that gets the corner right gets the full matrix right — the corner exercises the same code paths as every other tile.
+        </p>
+      </div>
+
+      <!-- SCOPE -->
+      <h3 style="margin-top: 40px; margin-bottom: 20px; color: var(--muted); font-size: 12px; letter-spacing: 1px; text-transform: uppercase;">Scope &amp; Limitations</h3>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why not just use PyTorch for all of this?</h4>
+        <p style="margin: 0;">
+          PyTorch calls cuBLAS, cuDNN, and FlashAttention under the hood — it hides exactly the hardware behavior this project studies. <code>torch.matmul</code> will give you 170 TFLOP/s on an H100, but it won't tell you why, what the bottleneck is at lower performance, or what changes when you move from T4 to H100. Writing the kernels directly in CUDA is what makes the progression measurable and the explanation grounded.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>Why not build an end-to-end LLM?</h4>
+        <p style="margin-bottom: 8px;">
+          "I trained a GPT" is a common project. It doesn't demonstrate GPU performance engineering — it demonstrates that PyTorch and Hugging Face work. This project targets the layer below: the kernels that PyTorch calls, why they perform the way they do, and what it takes to make them faster.
+        </p>
+        <p style="margin: 0;">
+          The flip side: everything in KernelX is a building block of an LLM. GEMM is the linear layer. Softmax and attention are the attention mechanism. LayerNorm is in every transformer block. The project is about understanding those building blocks rigorously, not assembling them into a demo.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-bottom: 16px;">
+        <h4>What about Nsight Compute (ncu)?</h4>
+        <p style="margin: 0;">
+          <code>ncu</code> was part of the original design — it would have provided hardware Speed-of-Light metrics: SM utilization %, HBM bandwidth %, occupancy, and per-warp stall breakdown. On ROSIE, <code>ncu</code> is blocked by <code>perf_event_paranoid=4</code> (a system-wide sysadmin policy that locks hardware performance counters). The profiling pipeline was redesigned around Nsight Systems (<code>nsys</code>), which uses CUDA driver API callbacks and is unaffected by the permission restriction. The roofline positions claimed in this project are computed analytically from FLOP counts and published H100 specs rather than read from a tool. See the Infrastructure section for the full explanation.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-bottom: 0;">
+        <h4>Can I run this on Windows?</h4>
+        <p style="margin: 0;">
+          Technically yes — CUDA, CMake, and MSVC all support Windows. In practice, the SLURM scripts, shell-based analysis pipeline, and development workflow assume Linux. WSL2 on Windows works well and is the recommended path if you don't have a native Linux environment. The core C++/CUDA code has no OS-specific dependencies.
+        </p>
+      </div>
+
     </section>
 
   </div><!-- .main-content -->
