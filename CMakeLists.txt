@@ -15,7 +15,12 @@ endif()
 # ── CUDA compute capabilities ─────────────────────────────────────────────────
 # V100=70  T4=75  A100=80  H100=90
 # Generating PTX for 90 ensures forward compatibility on future Hopper variants.
-set(CMAKE_CUDA_ARCHITECTURES 70 75 80 90)
+# Guard with NOT DEFINED so that -DCMAKE_CUDA_ARCHITECTURES=<x> on the cmake
+# command line (e.g. from SLURM scripts) is not silently overridden by a plain
+# set() — a plain set() creates a normal variable that shadows the cache value.
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES 70 75 80 90)
+endif()
 
 # ── Compiler flags ────────────────────────────────────────────────────────────
 set(CMAKE_CXX_FLAGS_RELEASE  "-O3 -march=native")
