@@ -1,4 +1,6 @@
 build/
+build_*/
+third_party/
 results/*.jsonl
 results/*.csv
 *.out

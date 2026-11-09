@@ -26,22 +26,20 @@ set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -lineinfo")   # -lineinfo keeps source mapping
 find_package(CUDAToolkit REQUIRED)
 
 # ── CUTLASS (header-only) ─────────────────────────────────────────────────────
-# Headers are fetched once and cached in the build directory.
-# On compute nodes without internet access, run cmake once on the login node
-# before submitting — subsequent builds reuse the cached source.
-include(FetchContent)
-FetchContent_Declare(
-    cutlass
-    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
-    GIT_TAG        v3.5.0
-    GIT_SHALLOW    TRUE
-    GIT_SUBMODULES ""
-)
-set(CUTLASS_ENABLE_HEADERS_ONLY ON  CACHE BOOL "" FORCE)
-set(CUTLASS_ENABLE_TESTS        OFF CACHE BOOL "" FORCE)
-set(CUTLASS_ENABLE_EXAMPLES     OFF CACHE BOOL "" FORCE)
-set(CUTLASS_ENABLE_TOOLS        OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(cutlass)
+# CUTLASS 3.5.0 headers are vendored at third_party/cutlass/include via a
+# sparse git clone (see third_party/cutlass/.git).  No internet access is
+# required on compute nodes; headers live on the shared home filesystem.
+#
+# To update: cd third_party/cutlass && git fetch && git checkout <new-tag>
+set(CUTLASS_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third_party/cutlass/include)
+if(NOT EXISTS "${CUTLASS_INCLUDE_DIR}/cutlass/cutlass.h")
+    message(FATAL_ERROR
+        "CUTLASS headers not found at ${CUTLASS_INCLUDE_DIR}.\n"
+        "Run from the repo root:\n"
+        "  git clone --depth 1 --branch v3.5.0 --filter=blob:none --sparse "
+        "https://github.com/NVIDIA/cutlass.git third_party/cutlass\n"
+        "  cd third_party/cutlass && git sparse-checkout set include")
+endif()
 
 # ── Sources ───────────────────────────────────────────────────────────────────
 set(KERNELX_SOURCES
@@ -61,9 +59,10 @@ add_executable(bench ${KERNELX_SOURCES})
 target_include_directories(bench PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CUDAToolkit_INCLUDE_DIRS}
+    ${CUTLASS_INCLUDE_DIR}
 )
 
-target_link_libraries(bench PRIVATE CUDA::cudart nvidia::cutlass::cutlass)
+target_link_libraries(bench PRIVATE CUDA::cudart)
 
 target_compile_options(bench PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:
