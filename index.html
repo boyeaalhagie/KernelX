@@ -795,6 +795,30 @@
           </div>
         </div>
       </div>
+
+      <h3 style="margin-top: 40px; margin-bottom: 12px;">Triton: High-Level GPU Programming vs Hand-Tuned CUDA</h3>
+      <p>
+        Triton (OpenAI) is a Python DSL that compiles to PTX without requiring the programmer to manage registers, shared memory layout, or instruction scheduling explicitly. The autotuner exhaustively searches tile dimensions and block sizes at compile time, selecting the configuration that maximizes throughput on the target GPU.
+      </p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0;">
+        <div class="card">
+          <h3 style="font-size: 13px; margin-bottom: 8px;">What Triton abstracts away</h3>
+          <p style="font-size: 12px; margin: 0; line-height: 1.65;">Register blocking, shared memory bank conflicts, vectorized load alignment, loop unrolling, pipeline depth. The programmer writes the tile logic; the compiler handles the rest.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 13px; margin-bottom: 8px;">What you give up</h3>
+          <p style="font-size: 12px; margin: 0; line-height: 1.65;">Direct <code>mma.sync</code> Tensor Core access, fine-grained <code>cp.async</code> pipeline control, and PTX-level instruction selection. CUTLASS's 18% lead at N=4096 comes entirely from these.</p>
+        </div>
+      </div>
+      <div class="callout" style="margin-top: 0;">
+        <h4>What 82% of CUTLASS at N=4096 Means</h4>
+        <p style="margin-bottom: 8px;">
+          At small N (512), CUTLASS is 1.8× faster than Triton — the autotuner hasn't found optimal tile dims for small problem sizes and the per-launch overhead matters more. At N=4096 the gap closes to 18%. This is the autotuner's correct regime: it finds near-optimal tiling for large, latency-insensitive problems without manual register analysis.
+        </p>
+        <p style="margin: 0;">
+          The practical conclusion: Triton is the right tool when you need a custom kernel fast and the problem is large enough to amortize autotuner search cost. CUTLASS is the right tool when you need every last TFLOP/s and can afford to manage pipeline stages manually. This project implements both so the tradeoff is measured, not assumed.
+        </p>
+      </div>
     </section>
 
     <!-- SOFTMAX -->
@@ -961,6 +985,41 @@
           <h3>SLURM Integration</h3>
           <p>Real HPC cluster (MSOE ROSIE), H100 dgxh100 partition. Automated build + profile in a single job submission. Results pull back via SLURM output files.</p>
         </div>
+      </div>
+
+      <h3 style="margin-top: 40px; margin-bottom: 12px;">Nsight Systems vs Nsight Compute — Why nsys, Not ncu</h3>
+      <p style="font-size: 13px;">
+        The original design called for Nsight Compute (<code>ncu</code>) to capture hardware Speed-of-Light metrics: compute %, HBM %, arithmetic intensity, occupancy, and warp stall breakdown. On ROSIE's H100 nodes, <code>ncu</code> is blocked.
+      </p>
+      <div class="table-wrap" style="margin: 16px 0;">
+        <table>
+          <thead>
+            <tr><th>Tool</th><th>Mechanism</th><th>What it captures</th><th>ROSIE status</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ncu</td>
+              <td>Hardware perf counters via <code>CAP_PERFMON</code></td>
+              <td>Compute SOL %, HBM SOL %, arithmetic intensity, occupancy, per-warp stall type</td>
+              <td style="color: var(--red);">Blocked — <code>perf_event_paranoid=4</code> locks hardware counters system-wide. Requires sysadmin to set ≤ 2.</td>
+            </tr>
+            <tr>
+              <td>nsys</td>
+              <td>CUDA driver API callbacks (no hardware counters)</td>
+              <td>Kernel wall-clock timing (avg/med/min/max), instance count, CUDA API overhead, H2D/D2H transfer bandwidth</td>
+              <td style="color: var(--green);">Working — driver callbacks are unaffected by <code>perf_event_paranoid</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout" style="margin-bottom: 32px;">
+        <h4>The Engineering Response</h4>
+        <p style="margin-bottom: 8px;">
+          Rather than stopping at the permission error, the profiling pipeline was redesigned around nsys. A custom parser (<code>parse_nsys.py</code>) was written to extract structured data from <code>nsys --stats=true</code> fixed-width table output — a format with no existing parser. The result is kernel timing stable to ±1% across 10 launches, confirmed PCIe bandwidth measurements, and CUDA API overhead per workload.
+        </p>
+        <p style="margin: 0;">
+          The hardware SOL / arithmetic intensity data that ncu would have provided is instead derived from first principles: arithmetic intensity is calculated from the known FLOP count and measured memory traffic, and roofline position is determined analytically against published H100 specs (60 TFLOP/s FP32, 3.35 TB/s HBM3, ridge point 17.9 FLOP/byte). Every roofline claim in this report is grounded in that calculation, not in a tool readout.
+        </p>
       </div>
 
       <h3 style="margin-top: 32px; margin-bottom: 12px;">Sample <code>analyze.py</code> Output — GEMM</h3>
