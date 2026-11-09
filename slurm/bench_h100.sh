@@ -112,7 +112,7 @@ done
 echo ""
 echo "=== Attention Benchmarks (H100) ==="
 # N = sequence length; D = head dimension (fixed at 64, typical for multi-head attention)
-ATTN_N_SIZES=(512 1024 2048 4096)
+ATTN_N_SIZES=(512 1024 2048 4096 8192)
 ATTN_IMPLS=(cuda_naive cuda_flash)
 
 for N_SIZE in "${ATTN_N_SIZES[@]}"; do

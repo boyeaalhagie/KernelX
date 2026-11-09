@@ -5,59 +5,62 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // FlashAttention-1 kernel — single-pass tiled attention, no N×N scratch.
 //
-// Tile geometry:
-//   kBc = 32   K/V tile width (kBc == warpSize: lane tid owns key/value row tid)
-//   kD  = 64   head dimension (compile-time constant)
+// Block structure: (kBc=32, kBr=32) = 1024 threads / 32 warps.
+//   Warp wid (threadIdx.y) processes query row (block_start + wid).
+//   Lane lid (threadIdx.x) owns key column lid within each tile.
+// Grid: (ceil(N/kBr),) blocks.
 //
-// Thread/block mapping:
-//   Block: (32,)   Grid: (N,)   — one warp per query row i
+// Memory traffic analysis (compare at N=4096, D=64):
+//   This kernel (kBr=kBc=32):
+//     K reads = (N/kBr)·(N/kBc)·kBc·D·4 = N²·D·4/kBr = 128 MB  (D=64, kBr=32)
+//     V reads = 128 MB.  Q reads = O writes = 1 MB each.  Total ≈ 258 MB.
+//   cuda_naive (3-kernel, materialises S):
+//     write S + 2× read S + write P = 4·N²·4 = 256 MB at N=4096.  Total ≈ 260 MB.
+//   → Roughly equal traffic at D=64, kBr=32 (break-even: D/kBr = 2).
+//   → Flash's advantage: (a) no O(N²) VRAM allocation — naive OOMs at N≈16K on
+//     80GB H100; (b) one kernel launch vs three; (c) Q tile stays warm in L2.
 //
-// Lane ownership:
-//   Each lane tid owns 2 output dimensions: [tid] and [tid+32].
-//   o_reg[2] holds the running unnormalised output for those 2 dims.
-//   Accumulation is 2 FMAs per j per lane (not kD=64), eliminating register spill.
+// Shared memory per block:
+//   s_Q[kBr][kD]      = 8    KB  (Q tile, loaded once)
+//   s_K[kBc][kDp1]    = 8.125 KB (K tile, +1 pad — bank conflict avoidance)
+//   s_V[kBc][kDp1]    = 8.125 KB (V tile, +1 pad)
+//   s_S[kBr][kBc]     = 4    KB  (scores for all (query, key) pairs in tile)
+//   Total ≈ 28.25 KB (fits in 48 KB L1 on Ampere/Hopper).
 //
-// Shared memory per block (kBc=32, kD=64):
-//   s_Q[kD]            = 256  B  (Q[i] loaded once, reused every tile)
-//   s_K[kBc][kD + 1]   = 8.25 KB (K tile; +1 pad eliminates bank conflicts)
-//   s_V[kBc][kD + 1]   = 8.25 KB (V tile; +1 pad eliminates bank conflicts)
-//   s_S[kBc]           = 128  B  (per-tile attention scores)
-//   Total ≈ 17 KB (well within 48 KB L1 on Ampere/Hopper)
+// Bank conflict analysis:
+//   s_K[kBc][kDp1]: s_K[k][d] at word k·(kD+1)+d.  Bank = (k+d)%32 for 32 lanes
+//     simultaneously accessing s_K[lid][d] → all 32 banks distinct, zero conflict.
+//   s_V[kBc][kDp1]: s_V[j][lid] for 32 lanes → bank = (j+lid)%32, no conflict.
+//   s_S[kBr][kBc]: s_S[wid][lid] write → bank = lid%32, no conflict within warp.
+//     s_S[wid][j] accumulation read → broadcast (all lanes same address), no conflict.
+//   s_Q[kBr][kD]: s_Q[wid][d] read → broadcast within warp, no conflict.
 //
-// Bank conflict analysis (s_K[kBc][kD+1], kD+1=65):
-//   s_K[k][d] is at word offset k*65+d.  Bank = (k*65+d)%32 = (k+d)%32.
-//   For 32 lanes accessing s_K[tid][d] simultaneously (d fixed):
-//     bank(tid) = (tid+d)%32 — all 32 banks hit exactly once.  No conflict.
-//
-// Coalesced global memory loading (tile loop):
-//   Loading kBc*kD = 2048 elements with 32 lanes:
-//     for idx = tid, tid+32, ...:   row = idx/kD,  col = idx%kD
-//     addr = K[(tile_start + row)*kD + col]
-//   At each idx: 32 lanes access consecutive addresses → one 128-byte transaction.
-//   Contrast with naive row-by-row: lane tid reads K[tile_start+tid][d] for all d
-//   simultaneously → stride-kD = 256 B → 32 independent cache-line fetches per d.
+// Coalesced global loads:
+//   Tile loads index by flat idx = tid_flat, tid_flat+1024, ...;
+//   row = idx/kD, col = idx%kD → 32 consecutive lanes, consecutive addresses.
 //
 // Per-tile algorithm:
-//   1. Coalesced load K/V tile → s_K, s_V (each: 64 transactions of 128 B).
-//   2. Lane tid computes full dot product: S[tid] = dot(s_Q, s_K[tid]) * scale.
-//      — 64 sequential FMAs per lane; shared memory bank-conflict-free via +1 pad.
-//   3. Warp-reduce for tile max → tile_m; m_new = max(m, tile_m).
-//   4. Rescale o_reg[0..1] by exp(m − m_new)  (2 ops, not kD=64).
-//   5. For j in [0, tile_width):
-//        e_j = exp(S[j] − m_new);  tile_l += e_j
-//        o_reg[0] += e_j * s_V[j][tid];      ← 2 FMAs per lane per j
-//        o_reg[1] += e_j * s_V[j][tid + 32];
-//   6. l = l*exp(m−m_new) + tile_l;  m = m_new.
+//   1. Load K and V tiles collaboratively (all 1024 threads, coalesced).
+//   2. __syncthreads()
+//   3. Lane lid computes s_S[wid][lid] = dot(s_Q[wid], s_K[lid]) * scale (64 FMAs).
+//   4. __syncwarp()
+//   5. Warp-reduce tile max → tile_m; m_new = max(m, tile_m).
+//   6. Rescale o_reg[0..1] by exp(m − m_new)  (2 FMAs per lane).
+//   7. For j in [0, tile_width): accumulate exp(s_S[wid][j] − m_new)·s_V[j][lid/lid+32].
+//   8. Update l, m.  __syncthreads() before next tile.
 //
-// Final: o_row[tid] = o_reg[0] / l;   o_row[tid+32] = o_reg[1] / l
+// Final: o_row[qi][lid] = o_reg[0]/l, o_row[qi][lid+32] = o_reg[1]/l.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace kernelx {
 
-static constexpr int kBc  = 32;        // K/V tile size; must equal warpSize
-static constexpr int kD   = 64;        // head dimension (compile-time)
-static constexpr int kDp1 = kD + 1;    // padded row stride to avoid bank conflicts
+static constexpr int kBr  = 32;        // query rows per block (== warps per block)
+static constexpr int kBc  = 32;        // K/V tile width (== warpSize)
+static constexpr int kD   = 64;        // head dimension
+static constexpr int kDp1 = kD + 1;    // padded row stride to eliminate bank conflicts
 
+// Block: (kBc, kBr) = (32, 32) = 1024 threads
+// Grid:  (ceil(N/kBr),)
 __global__ void flash_attn_kernel(
         const float* __restrict__ Q,   // [N, kD]
         const float* __restrict__ K,   // [N, kD]
@@ -65,24 +68,31 @@ __global__ void flash_attn_kernel(
         float*       __restrict__ O,   // [N, kD]
         int N, float scale)
 {
-    const int i   = blockIdx.x;   // query row
-    const int tid = threadIdx.x;  // lane index [0, 32)
+    const int lid         = threadIdx.x;         // lane  [0, kBc)
+    const int wid         = threadIdx.y;         // warp  [0, kBr)
+    const int block_start = blockIdx.x * kBr;   // first query row in this block
+    const int qi          = block_start + wid;   // global query row for this warp
 
-    // ── Shared memory ────────────────────────────────────────────────────────
-    __shared__ float s_Q[kD];
-    __shared__ float s_K[kBc][kDp1];   // +1 pad per row to eliminate bank conflicts
+    __shared__ float s_Q[kBr][kD];
+    __shared__ float s_K[kBc][kDp1];   // +1 pad per row: bank = (row+col)%32
     __shared__ float s_V[kBc][kDp1];
-    __shared__ float s_S[kBc];
+    __shared__ float s_S[kBr][kBc];
 
-    // ── Load Q[i] — 64 consecutive floats, 2 loads per lane, coalesced ──────
-    s_Q[tid]      = Q[i * kD + tid];
-    s_Q[tid + 32] = Q[i * kD + tid + 32];
-    __syncwarp();
+    // ── Load Q tile (kBr×kD = 2048 elements, 1024 threads → 2 loads each) ──
+    // Coalesced: flat_idx = wid*kBc+lid; consecutive threads → consecutive addrs.
+    const int tid_flat = wid * kBc + lid;
+    for (int idx = tid_flat; idx < kBr * kD; idx += kBr * kBc) {
+        const int row = idx / kD;
+        const int col = idx % kD;
+        const int src = block_start + row;
+        s_Q[row][col] = (src < N) ? Q[src * kD + col] : 0.0f;
+    }
+    __syncthreads();
 
-    // ── Online state ─────────────────────────────────────────────────────────
+    // ── Online state (registers, per warp) ────────────────────────────────────
     float m        = -FLT_MAX;
     float l        = 0.0f;
-    float o_reg[2] = {};   // lane tid owns dims [tid, tid+32]
+    float o_reg[2] = {};   // lane lid owns output dims [lid] and [lid+32]
 
     const int tc = (N + kBc - 1) / kBc;
 
@@ -90,38 +100,33 @@ __global__ void flash_attn_kernel(
         const int tile_start = tile * kBc;
         const int tile_width = min(kBc, N - tile_start);
 
-        // ── Coalesced load of K tile into s_K ────────────────────────────
-        // idx ranges over kBc*kD=2048 elements in strides of 32.
-        // row=idx/kD, col=idx%kD — consecutive lanes, consecutive addresses.
-        for (int idx = tid; idx < kBc * kD; idx += 32) {
+        // ── Coalesced load K and V tiles ──────────────────────────────────
+        // kBc×kD = 2048 elements, 1024 threads → 2 elements per thread.
+        // row = idx/kD, col = idx%kD: consecutive flat_idx → consecutive addrs.
+        for (int idx = tid_flat; idx < kBc * kD; idx += kBr * kBc) {
             const int row = idx / kD;
             const int col = idx % kD;
-            const int src_row = tile_start + row;
-            s_K[row][col] = (src_row < N) ? K[src_row * kD + col] : 0.0f;
+            const int src = tile_start + row;
+            s_K[row][col] = (src < N) ? K[src * kD + col] : 0.0f;
+            s_V[row][col] = (src < N) ? V[src * kD + col] : 0.0f;
         }
+        __syncthreads();
 
-        // ── Coalesced load of V tile into s_V ────────────────────────────
-        for (int idx = tid; idx < kBc * kD; idx += 32) {
-            const int row = idx / kD;
-            const int col = idx % kD;
-            const int src_row = tile_start + row;
-            s_V[row][col] = (src_row < N) ? V[src_row * kD + col] : 0.0f;
-        }
-        __syncwarp();
-
-        // ── Score: S[tid] = dot(s_Q, s_K[tid]) * scale ───────────────────
-        // s_K[tid][d]: bank = (tid+d)%32 — no conflict (see header).
+        // ── Score: s_S[wid][lid] = dot(s_Q[wid], s_K[lid]) * scale ──────
+        // All 32 warps execute simultaneously; each computes one row of s_S.
+        // s_K[lid][d]: bank = (lid+d)%32 (padded layout) — no conflict.
+        // s_Q[wid][d]: broadcast within warp — no conflict.
         float s_j = 0.0f;
-        if (tid < tile_width) {
+        if (lid < tile_width) {
             for (int d = 0; d < kD; ++d)
-                s_j += s_Q[d] * s_K[tid][d];
+                s_j += s_Q[wid][d] * s_K[lid][d];
             s_j *= scale;
         }
-        s_S[tid] = (tid < tile_width) ? s_j : -FLT_MAX;
+        s_S[wid][lid] = (lid < tile_width) ? s_j : -FLT_MAX;
         __syncwarp();
 
-        // ── Tile max via warp butterfly reduction ─────────────────────────
-        float tile_m = s_S[tid];
+        // ── Tile max via warp butterfly ───────────────────────────────────
+        float tile_m = s_S[wid][lid];
         for (int offset = 16; offset >= 1; offset >>= 1)
             tile_m = fmaxf(tile_m, __shfl_down_sync(0xFFFFFFFF, tile_m, offset));
         tile_m = __shfl_sync(0xFFFFFFFF, tile_m, 0);
@@ -129,30 +134,33 @@ __global__ void flash_attn_kernel(
         // ── Rescale running output with new max ───────────────────────────
         const float m_new   = fmaxf(m, tile_m);
         const float rescale = expf(m - m_new);
-        o_reg[0] *= rescale;   // dim tid
-        o_reg[1] *= rescale;   // dim tid+32
+        o_reg[0] *= rescale;   // dim lid
+        o_reg[1] *= rescale;   // dim lid+32
 
         // ── Accumulate V contribution ─────────────────────────────────────
-        // s_V[j][tid]:    bank = (j+tid)%32   — no conflict.
-        // s_V[j][tid+32]: bank = (j+tid)%32   — same bank but sequential instruction.
+        // s_S[wid][j]: broadcast per j iteration — no conflict.
+        // s_V[j][lid]:    bank = (j+lid)%32   — no conflict.
+        // s_V[j][lid+32]: bank = (j+lid)%32   — same, sequential instr, OK.
         float tile_l = 0.0f;
         for (int j = 0; j < tile_width; ++j) {
-            const float e_j = expf(s_S[j] - m_new);
+            const float e_j = expf(s_S[wid][j] - m_new);
             tile_l  += e_j;
-            o_reg[0] += e_j * s_V[j][tid];
-            o_reg[1] += e_j * s_V[j][tid + 32];
+            o_reg[0] += e_j * s_V[j][lid];
+            o_reg[1] += e_j * s_V[j][lid + 32];
         }
 
         l = l * rescale + tile_l;
         m = m_new;
-        __syncwarp();
+        __syncthreads();   // ensure all warps finish before next tile overwrites s_K/s_V
     }
 
-    // ── Normalise and write output ────────────────────────────────────────────
-    const float inv_l = 1.0f / l;
-    float* o_row = O + static_cast<ptrdiff_t>(i) * kD;
-    o_row[tid]      = o_reg[0] * inv_l;
-    o_row[tid + 32] = o_reg[1] * inv_l;
+    // ── Normalise and write output ─────────────────────────────────────────────
+    if (qi < N) {
+        const float inv_l = 1.0f / l;
+        float* o_row = O + static_cast<ptrdiff_t>(qi) * kD;
+        o_row[lid]      = o_reg[0] * inv_l;
+        o_row[lid + 32] = o_reg[1] * inv_l;
+    }
 }
 
 void AttentionCudaFlash::setup(const WorkloadConfig& cfg) {
@@ -163,8 +171,10 @@ void AttentionCudaFlash::setup(const WorkloadConfig& cfg) {
 }
 
 void AttentionCudaFlash::run() {
-    const dim3 block(kBc);
-    const dim3 grid(M_);
+    // Block: (kBc, kBr) = (32, 32) = 1024 threads (32 warps, one per query row).
+    // Grid:  (ceil(N/kBr),) blocks.
+    const dim3 block(kBc, kBr);
+    const dim3 grid((M_ + kBr - 1) / kBr);
     flash_attn_kernel<<<grid, block>>>(d_Q_, d_K_, d_V_, d_O_, M_, scale());
     CUDA_CHECK(cudaGetLastError());
     download_output();
