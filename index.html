@@ -847,7 +847,7 @@
       <div class="section-label">Workload 1</div>
       <h2>GEMM — Matrix Multiplication</h2>
       <p>
-        General matrix multiplication (C = A × B, M=N=K, fp32) is the most compute-intensive primitive in deep learning. Five implementations form a deliberate progression from a naive global-memory kernel through manual Tensor Core access (WMMA) to CUTLASS TF32 — a 32.6× wall-clock improvement on H100, each step motivated by a specific hardware constraint.
+        General matrix multiplication (C = A × B, M=N=K, fp32) is the most compute-intensive primitive in deep learning. Five implementations form a deliberate progression from naive global-memory (5.2 TFLOP/s) through manual WMMA Tensor Core access (27.9 TFLOP/s) to CUTLASS TF32 (169.3 TFLOP/s) — a 32.6× wall-clock improvement, each step exposing a specific hardware constraint on the H100.
       </p>
 
       <div class="chart-wrap">
@@ -869,7 +869,7 @@
             <tr><td>cuda_naive</td><td>26.3 ms</td><td>5.2</td><td>1× baseline</td></tr>
             <tr><td>cuda_tiled</td><td>15.6 ms</td><td>8.8</td><td>1.7×</td></tr>
             <tr><td>cuda_tuned</td><td>6.5 ms</td><td>21.1</td><td>4.1×</td></tr>
-            <tr><td>cuda_wmma</td><td>—</td><td>—</td><td>benchmark pending</td></tr>
+            <tr><td>cuda_wmma</td><td>4.9 ms</td><td>27.9</td><td>5.4×</td></tr>
             <tr><td>Triton</td><td>0.99 ms</td><td>139.5</td><td>26.8×</td></tr>
             <tr class="best"><td>CUTLASS</td><td>0.81 ms</td><td>169.3</td><td>32.6×</td></tr>
           </tbody>
@@ -901,8 +901,8 @@
         <div class="insight-card">
           <span class="badge">WMMA</span>
           <div>
-            <p style="margin-bottom: 6px;">Manual Tensor Core access via <code>nvcuda::wmma</code>. FP16 inputs, FP32 accumulator. Each warp owns 2×2 fragments (32×32 output), dispatched with <code>mma_sync</code>. Benchmark in progress — this implementation exposes the gap between <em>accessing</em> Tensor Cores and <em>saturating</em> them.</p>
-            <p style="font-size: 12px; color: var(--orange); margin: 0;"><strong>Roofline:</strong> aimed at the Tensor Core ceiling — but without <code>cp.async</code> double-buffering, long-scoreboard stalls from the synchronous global→shared load will prevent full utilisation. The gap to CUTLASS measures exactly the value of software pipelining.</p>
+            <p style="margin-bottom: 6px;">Manual Tensor Core access via <code>nvcuda::wmma</code>. FP16 inputs, FP32 accumulator. Each warp owns 2×2 fragments (32×32 output), dispatched with <code>mma_sync</code>. 27.9 TFLOP/s — 5.4× over naive, but 6.1× behind CUTLASS.</p>
+            <p style="font-size: 12px; color: var(--orange); margin: 0;"><strong>Roofline:</strong> aimed at the Tensor Core ceiling but not reaching it — without <code>cp.async</code> double-buffering, long-scoreboard stalls from synchronous global→shared loads dominate. The 6.1× gap to CUTLASS is precisely the cost of missing software pipelining.</p>
           </div>
         </div>
         <div class="insight-card">
@@ -1424,6 +1424,13 @@ function baseOptions(extraScales) {
           data: [6.554, 18.492, 21.678, 21.096],
           borderColor: COLORS.tuned, backgroundColor: COLORS.tuned + '22',
           tension: 0.3, pointRadius: 4,
+        },
+        {
+          label: 'cuda_wmma (fp16 TC)',
+          data: [4.06, 17.64, 32.56, 27.92],
+          borderColor: '#ff9500', backgroundColor: '#ff950022',
+          tension: 0.3, pointRadius: 4,
+          borderDash: [4, 2],
         },
         {
           label: 'Triton',

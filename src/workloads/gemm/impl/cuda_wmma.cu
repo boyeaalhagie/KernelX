@@ -71,7 +71,6 @@ __global__ void gemm_wmma_kernel(
     static_assert(BK  % 16 == 0, "BK must be divisible by 16 (WMMA fragment depth)");
 
     constexpr int WARPS_N = BN / (WarpTN * 16);  // warps along N within block
-    constexpr int WARPS_M = BM / (WarpTM * 16);  // warps along M within block
 
     // ── Warp identity ─────────────────────────────────────────────────────────
     const int warp_id = threadIdx.x / 32;
