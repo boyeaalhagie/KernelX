@@ -12,7 +12,8 @@ namespace kernelx {
 //
 // Precision strategy:
 //   Global memory  : __half  (2 bytes/element — halves HBM traffic)
-//   Shared memory  : float   (converted on load — simpler, same as FP32 path)
+//   Shared memory  : __half  (2× less L1/shared traffic in dot-product loop)
+//   Dot product    : __half2 vectorised loads → float FMAs (2 elems/instr)
 //   Register accum : float   (m, l, o_reg[2] — numerical stability for softmax)
 //
 // Expected speedup vs cuda_flash (FP32):
