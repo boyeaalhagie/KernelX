@@ -20,6 +20,8 @@
 #include "workloads/datamove/impl/pageable.hpp"
 #include "workloads/datamove/impl/pinned.hpp"
 #include "workloads/datamove/impl/pinned_async.hpp"
+#include "workloads/datamove/impl/bidirectional.hpp"
+#include "workloads/attention/impl/cuda_flash_fp16.hpp"
 #include "workloads/workload.hpp"
 
 #include <iostream>
@@ -144,7 +146,8 @@ static std::unique_ptr<kernelx::Workload> make_workload(
     if (workload == "attention") {
         if (impl == "cpu_reference") return std::make_unique<kernelx::AttentionCpuReference>();
         if (impl == "cuda_naive")    return std::make_unique<kernelx::AttentionCudaNaive>();
-        if (impl == "cuda_flash")    return std::make_unique<kernelx::AttentionCudaFlash>();
+        if (impl == "cuda_flash")      return std::make_unique<kernelx::AttentionCudaFlash>();
+        if (impl == "cuda_flash_fp16") return std::make_unique<kernelx::AttentionCudaFlashFp16>();
         throw std::invalid_argument("unknown attention implementation: '" + impl + "'");
     }
     if (workload == "reduction") {
@@ -156,7 +159,8 @@ static std::unique_ptr<kernelx::Workload> make_workload(
     if (workload == "datamove") {
         if (impl == "pageable")     return std::make_unique<kernelx::DataMovePageable>();
         if (impl == "pinned")       return std::make_unique<kernelx::DataMovePinned>();
-        if (impl == "pinned_async") return std::make_unique<kernelx::DataMovePinnedAsync>();
+        if (impl == "pinned_async")   return std::make_unique<kernelx::DataMovePinnedAsync>();
+        if (impl == "bidirectional")  return std::make_unique<kernelx::DataMoveBidirectional>();
         throw std::invalid_argument("unknown datamove implementation: '" + impl + "'");
     }
     throw std::invalid_argument("unknown workload: '" + workload + "'");

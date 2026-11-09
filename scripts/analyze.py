@@ -180,6 +180,38 @@ _INSIGHTS: dict[tuple, dict] = {
             "heads across the batch dimension for better SM utilisation."
         ),
     },
+    ("attention", "cuda_flash_fp16"): {
+        "observed": (
+            "Mixed-precision FlashAttention: Q/K/V/O stored as __half in global "
+            "memory (2 bytes/element), all arithmetic in float registers.  "
+            "HBM traffic is halved vs cuda_flash (FP32): K/V reads ≈ 64 MB at "
+            "N=4096 vs 128 MB.  Approaches 2× speedup at large N where the "
+            "kernel is bandwidth-bound.  Shared memory stays float (convert on "
+            "load) — no bank-conflict or layout changes required."
+        ),
+        "next": (
+            "Full Tensor Core path: use WMMA (wmma::load_matrix_sync) for the "
+            "Q·K^T dot product (16×16×16 FP16 mma) to additionally exploit the "
+            "H100's 989 TFLOP/s FP16 Tensor Core throughput.  Requires "
+            "reshaping the tile layout to 16×16 fragments."
+        ),
+    },
+    ("datamove", "bidirectional"): {
+        "observed": (
+            "Two independent streams overlap H2D (stream0) and D2H (stream1) "
+            "concurrently.  PCIe is full-duplex: upstream and downstream lanes "
+            "operate independently.  Total bytes/s = H2D GB/s + D2H GB/s, "
+            "approaching 2× the unidirectional pinned ceiling.  "
+            "cudaDeviceSynchronize waits for both streams; each DMA engine runs "
+            "at full speed without interference."
+        ),
+        "next": (
+            "Double-buffered compute+transfer pipeline: alternate between buffer "
+            "pairs so H2D for batch N+1 overlaps with kernel execution on batch N.  "
+            "Effective throughput = max(kernel time, transfer time) rather than "
+            "kernel_time + transfer_time — hides PCIe latency entirely."
+        ),
+    },
     ("reduction", "cuda_naive"): {
         "observed": (
             "Shared-memory tree reduction: 8 __syncthreads() barriers per row for "

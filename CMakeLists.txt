@@ -77,6 +77,8 @@ set(KERNELX_SOURCES
     src/workloads/datamove/impl/pageable.cu
     src/workloads/datamove/impl/pinned.cu
     src/workloads/datamove/impl/pinned_async.cu
+    src/workloads/datamove/impl/bidirectional.cu
+    src/workloads/attention/impl/cuda_flash_fp16.cu
 )
 
 # ── CUTLASS TF32 Tensor Core path (sm_80+ only) ───────────────────────────────

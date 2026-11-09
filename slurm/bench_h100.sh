@@ -113,7 +113,7 @@ echo ""
 echo "=== Attention Benchmarks (H100) ==="
 # N = sequence length; D = head dimension (fixed at 64, typical for multi-head attention)
 ATTN_N_SIZES=(512 1024 2048 4096 8192)
-ATTN_IMPLS=(cuda_naive cuda_flash)
+ATTN_IMPLS=(cuda_naive cuda_flash cuda_flash_fp16)
 
 for N_SIZE in "${ATTN_N_SIZES[@]}"; do
     for IMPL in "${ATTN_IMPLS[@]}"; do
@@ -192,7 +192,7 @@ echo "=== Data Movement Benchmarks (H100) ==="
 # 'TFLOP/s' column reads directly as GB/s (see DataMoveWorkload::flops()).
 # Peak H100 PCIe 5.0 × 16 unidirectional: ~64 GB/s.
 DM_N_SIZES=(1048576 4194304 16777216 67108864 268435456)
-DM_IMPLS=(pageable pinned pinned_async)
+DM_IMPLS=(pageable pinned pinned_async bidirectional)
 
 for N_SIZE in "${DM_N_SIZES[@]}"; do
     for IMPL in "${DM_IMPLS[@]}"; do
