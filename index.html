@@ -676,6 +676,14 @@
         These are the two questions every result in this project is built to answer. Not "what is the fastest number I can get?" but a measurement-grounded explanation of the hardware bottleneck and a targeted fix derived from that explanation.
       </p>
 
+      <div style="background: rgba(255,107,107,0.07); border: 1px solid rgba(255,107,107,0.25); border-left: 3px solid var(--red); border-radius: var(--radius); padding: 20px 24px; margin: 24px 0;">
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--red); margin-bottom: 10px;">Not the goal</div>
+        <p style="margin-bottom: 8px; color: var(--text); font-weight: 600;">This project is not chasing the fastest number.</p>
+        <p style="font-size: 13px; margin: 0;">
+          Knowing that CUTLASS runs GEMM at 169 TFLOP/s is not the point. Knowing <em>why</em> the naive implementation runs at 5.2 TFLOP/s — and exactly which hardware constraint each step in the progression addresses — is the point. A result without an explanation is just a benchmark. An explanation grounded in a measurement is performance engineering.
+        </p>
+      </div>
+
       <h3 style="margin-top: 36px; margin-bottom: 16px;">The Engineering Problem</h3>
       <p>
         Modern AI workloads are increasingly constrained by how efficiently computation moves through GPU hardware — not simply whether the model produces the correct output. The gap between a correct naive implementation and a hardware-efficient one is not a constant factor. It is specific to the kernel, the problem size, and the hardware generation. The only way to close that gap systematically is to measure it, understand it, and act on what the measurement says.
@@ -808,6 +816,29 @@
       <p style="font-size: 12px; color: var(--muted); margin-top: 8px;">
         The FP16 result is the most important row. A wrong hypothesis that is measured and explained is better engineering than a right guess with no analysis.
       </p>
+
+      <h3 style="margin-top: 40px; margin-bottom: 16px;">Hardware Analysis Concepts</h3>
+      <p style="font-size: 13px;">
+        Every kernel is evaluated against four hardware frameworks. These are not independent metrics — they form a consistent picture of where cycles are going.
+      </p>
+      <div class="card-grid" style="margin-top: 16px;">
+        <div class="card">
+          <h3>Roofline Model</h3>
+          <p>Plots kernel performance against arithmetic intensity (FLOP/byte). The H100 ridge point is 17.9 FLOP/byte — below it the kernel is memory-bound; above it, compute-bound. Every optimization in this project moves a kernel along or toward the relevant ceiling.</p>
+        </div>
+        <div class="card">
+          <h3>Speed-of-Light</h3>
+          <p>What percentage of peak hardware throughput is the kernel achieving? Compute SOL %, HBM SOL %, L1/L2 SOL %. A kernel at 13% compute SOL and 5% HBM SOL is compute-bound with significant headroom — the right tool is Tensor Cores, not memory optimization.</p>
+        </div>
+        <div class="card">
+          <h3>Occupancy — Not a Direct Metric</h3>
+          <p>Occupancy (% of max warps active) is a common trap. <strong style="color: var(--text);">Higher occupancy does not mean higher performance.</strong> What matters is whether there are enough in-flight warps to hide memory latency. A compute-bound kernel at 50% occupancy can outperform a memory-bound kernel at 100%. Occupancy is a tool for diagnosing latency hiding, not an objective.</p>
+        </div>
+        <div class="card">
+          <h3>Warp Stall Analysis</h3>
+          <p>When a warp cannot issue an instruction it stalls. The dominant stall type identifies the bottleneck class: <code>long_scoreboard</code> stalls indicate HBM latency (memory-bound); <code>math_pipe_throttle</code> indicates the compute pipe is saturated (compute-bound); <code>mio_throttle</code> indicates memory instruction queue pressure. Not every stall is a performance problem — a stall that is fully hidden by other warps costs nothing.</p>
+        </div>
+      </div>
     </section>
 
     <!-- GEMM -->
@@ -1069,6 +1100,46 @@
         <div class="card">
           <h3>SLURM Integration</h3>
           <p>Real HPC cluster (MSOE ROSIE), H100 dgxh100 partition. Automated build + profile in a single job submission. Results pull back via SLURM output files.</p>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 40px; margin-bottom: 16px;">Full Technology Stack</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 32px;">
+        <div class="card">
+          <h3 style="font-size: 12px; color: var(--muted); margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase;">Core</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span class="tag">C++</span><span class="tag">CUDA C++</span><span class="tag">Python</span><span class="tag">CMake</span><span class="tag">Linux</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; color: var(--muted); margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase;">NVIDIA</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span class="tag">CUDA Toolkit</span><span class="tag">CUTLASS</span><span class="tag">Nsight Systems</span><span class="tag">Nsight Compute</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; color: var(--muted); margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase;">GPU Programming</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span class="tag">CUDA kernels</span><span class="tag">Triton</span><span class="tag">PTX</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; color: var(--muted); margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase;">Infrastructure</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span class="tag">Git</span><span class="tag">SLURM</span><span class="tag">Apptainer</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; color: var(--muted); margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase;">Analysis</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span class="tag">NumPy</span><span class="tag">Matplotlib</span><span class="tag">Pandas</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="font-size: 12px; color: var(--muted); margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase;">Hardware</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span class="tag">H100 80GB HBM3</span><span class="tag">60 TFLOP/s FP32</span><span class="tag">3.35 TB/s HBM</span>
+          </div>
         </div>
       </div>
 
