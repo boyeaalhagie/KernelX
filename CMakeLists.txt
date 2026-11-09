@@ -54,6 +54,32 @@ set(KERNELX_SOURCES
     src/workloads/gemm/impl/cuda_cutlass.cu
 )
 
+# ── CUTLASS TF32 Tensor Core path (sm_80+ only) ───────────────────────────────
+# cuda_cutlass_tf32.cu uses OpClassTensorOp + Sm80 which references TF32
+# mma.sync instructions unavailable on sm_75.  Restrict its compilation to
+# only the sm_80+ architectures present in CMAKE_CUDA_ARCHITECTURES, and
+# define KERNELX_CUTLASS_TF32 so the main cuda_cutlass.cu enables the
+# runtime dispatch branch.
+set(_SM80_PLUS "")
+foreach(_ARCH IN LISTS CMAKE_CUDA_ARCHITECTURES)
+    if(_ARCH GREATER_EQUAL 80)
+        list(APPEND _SM80_PLUS "${_ARCH}")
+    endif()
+endforeach()
+
+if(_SM80_PLUS)
+    list(APPEND KERNELX_SOURCES src/workloads/gemm/impl/cuda_cutlass_tf32.cu)
+    set_source_files_properties(
+        src/workloads/gemm/impl/cuda_cutlass_tf32.cu
+        PROPERTIES CUDA_ARCHITECTURES "${_SM80_PLUS}"
+    )
+    # Consumed by cuda_cutlass.cu to enable the TF32 dispatch branch
+    add_compile_definitions(KERNELX_CUTLASS_TF32)
+    message(STATUS "CUTLASS TF32 path enabled for sm: ${_SM80_PLUS}")
+else()
+    message(STATUS "CUTLASS TF32 path disabled (no sm_80+ in CMAKE_CUDA_ARCHITECTURES)")
+endif()
+
 add_executable(bench ${KERNELX_SOURCES})
 
 target_include_directories(bench PRIVATE

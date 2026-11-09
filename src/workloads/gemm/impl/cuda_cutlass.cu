@@ -3,29 +3,27 @@
 
 #include "cutlass/gemm/device/gemm.h"
 
-#include <stdexcept>
 #include <cmath>
+#include <stdexcept>
 #include <string>
 
 namespace kernelx {
 
 namespace {
 
-// ── CUTLASS Gemm type aliases ─────────────────────────────────────────────────
+// ── CUTLASS Gemm type alias — FP32 SIMT ──────────────────────────────────────
 //
-// GemmSimt  — FP32 SIMT math.  Targets sm_75 (T4).  CUTLASS automates tile
-//             shape selection, software pipelining, and predicated bounds
-//             checking — improvements over V3's hand-written tiling that are
-//             visible in Nsight Compute as higher L2 hit rate and fewer
-//             warp stalls.
+// GemmSimt targets sm_75 (T4) and any architecture that lacks TF32 Tensor
+// Cores.  CUTLASS's default tile shapes and software pipeline for OpClassSimt
+// are still a step up from V3's hand-written code: autotuned thread-block
+// shapes, vectorised 128-bit loads where alignment allows, and predicated
+// bounds checking without branch divergence.
 //
-// GemmTF32  — TF32 Tensor Core math.  Targets sm_80+ (H100).
-//             Each FP32 input operand is rounded to 10-bit mantissa TF32
-//             before the mma.sync.aligned.m16n8k8 instruction executes.
-//             This is the same math mode cuBLAS uses by default
-//             (CUBLAS_MATH_DEFAULT / CUBLAS_TF32_TENSOR_OP_MATH).
-//             The 3-stage software pipeline and async shared-memory copies
-//             (cp.async) hide global memory latency behind compute.
+// This type is safe to compile for any architecture because it uses only
+// standard FP32 multiply-accumulate instructions.  GemmTF32 (Sm80,
+// OpClassTensorOp) is kept in a separate translation unit
+// (cuda_cutlass_tf32.cu) compiled exclusively for sm_80+ to avoid CUTLASS
+// internal specialisation errors when sm_75 is in CMAKE_CUDA_ARCHITECTURES.
 
 using GemmSimt = cutlass::gemm::device::Gemm<
     float, cutlass::layout::RowMajor,   // A: row-major FP32
@@ -36,15 +34,6 @@ using GemmSimt = cutlass::gemm::device::Gemm<
     cutlass::arch::Sm75
 >;
 
-using GemmTF32 = cutlass::gemm::device::Gemm<
-    float, cutlass::layout::RowMajor,
-    float, cutlass::layout::RowMajor,
-    float, cutlass::layout::RowMajor,
-    float,
-    cutlass::arch::OpClassTensorOp,
-    cutlass::arch::Sm80
->;
-
 template <typename GemmOp>
 static void launch(int M, int N, int K, const float* A, const float* B, float* C) {
     typename GemmOp::Arguments args{
@@ -52,11 +41,11 @@ static void launch(int M, int N, int K, const float* A, const float* B, float* C
         {A, K},         // A ref: row-major, leading dim = K
         {B, N},         // B ref: row-major, leading dim = N
         {C, N},         // C source (beta=0 → unused)
-        {C, N},         // D output: row-major, leading dim = N
+        {C, N},         // D output
         {1.0f, 0.0f}    // alpha=1, beta=0  →  D = A×B
     };
     GemmOp op;
-    cutlass::Status status = op(args);   // runs on default stream (nullptr)
+    cutlass::Status status = op(args);
     if (status != cutlass::Status::kSuccess) {
         throw std::runtime_error(
             std::string("CUTLASS GEMM failed: ") + cutlassGetStatusString(status));
@@ -64,6 +53,14 @@ static void launch(int M, int N, int K, const float* A, const float* B, float* C
 }
 
 } // anonymous namespace
+
+// ── Forward declaration for TF32 path (cuda_cutlass_tf32.cu, sm_80+ only) ────
+#ifdef KERNELX_CUTLASS_TF32
+namespace kernelx_internal {
+    void launch_cutlass_tf32(int M, int N, int K,
+                              const float* A, const float* B, float* C);
+}
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -80,10 +77,13 @@ void GemmCudaCutlass::setup(const WorkloadConfig& cfg) {
 }
 
 void GemmCudaCutlass::run() {
-    if (sm_major_ >= 8)
-        launch<GemmTF32>(M_, N_, K_, d_A_, d_B_, d_C_);
-    else
-        launch<GemmSimt>(M_, N_, K_, d_A_, d_B_, d_C_);
+#ifdef KERNELX_CUTLASS_TF32
+    if (sm_major_ >= 8) {
+        kernelx_internal::launch_cutlass_tf32(M_, N_, K_, d_A_, d_B_, d_C_);
+        return;
+    }
+#endif
+    launch<GemmSimt>(M_, N_, K_, d_A_, d_B_, d_C_);
 }
 
 bool GemmCudaCutlass::verify() {
