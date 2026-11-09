@@ -72,6 +72,25 @@ for SIZE in "${SIZES[@]}"; do
 done
 
 echo ""
+echo "=== LayerNorm Benchmarks (T4) ==="
+LN_SIZES=(768 1024 2048 4096)
+LN_IMPLS=(cuda_naive cuda_welford)
+
+for N_SIZE in "${LN_SIZES[@]}"; do
+    for IMPL in "${LN_IMPLS[@]}"; do
+        echo "--- LayerNorm ${IMPL}  M=1024 N=${N_SIZE} ---"
+        srun "${BENCH}" \
+            --workload layernorm \
+            --implementation "${IMPL}" \
+            --m 1024 --n "${N_SIZE}" --k 1 \
+            --dtype fp32 \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify
+    done
+done
+
+echo ""
 echo "=== Softmax Benchmarks (T4) ==="
 SOFTMAX_SIZES=(1024 4096 8192 32768)
 SOFTMAX_IMPLS=(cuda_naive cuda_online)

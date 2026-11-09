@@ -61,6 +61,10 @@ set(KERNELX_SOURCES
     src/workloads/softmax/impl/cpu_reference.cpp
     src/workloads/softmax/impl/cuda_naive.cu
     src/workloads/softmax/impl/cuda_online.cu
+    src/workloads/layernorm/layernorm_workload.cpp
+    src/workloads/layernorm/impl/cpu_reference.cpp
+    src/workloads/layernorm/impl/cuda_naive.cu
+    src/workloads/layernorm/impl/cuda_welford.cu
 )
 
 # ── CUTLASS TF32 Tensor Core path (sm_80+ only) ───────────────────────────────

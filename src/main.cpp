@@ -8,6 +8,9 @@
 #include "workloads/softmax/impl/cpu_reference.hpp"
 #include "workloads/softmax/impl/cuda_naive.hpp"
 #include "workloads/softmax/impl/cuda_online.hpp"
+#include "workloads/layernorm/impl/cpu_reference.hpp"
+#include "workloads/layernorm/impl/cuda_naive.hpp"
+#include "workloads/layernorm/impl/cuda_welford.hpp"
 #include "workloads/workload.hpp"
 
 #include <iostream>
@@ -52,9 +55,12 @@ static void print_usage(const char* prog) {
         "  gemm    / cuda_tiled\n"
         "  gemm    / cuda_tuned\n"
         "  gemm    / cuda_cutlass\n"
-        "  softmax / cpu_reference\n"
-        "  softmax / cuda_naive\n"
-        "  softmax / cuda_online\n\n"
+        "  softmax   / cpu_reference\n"
+        "  softmax   / cuda_naive\n"
+        "  softmax   / cuda_online\n"
+        "  layernorm / cpu_reference\n"
+        "  layernorm / cuda_naive\n"
+        "  layernorm / cuda_welford\n\n"
         "Example:\n"
         "  ./bench --workload gemm --implementation cuda_naive \\\n"
         "          --m 4096 --n 4096 --k 4096 --dtype fp32   \\\n"
@@ -108,6 +114,12 @@ static std::unique_ptr<kernelx::Workload> make_workload(
         if (impl == "cuda_naive")    return std::make_unique<kernelx::SoftmaxCudaNaive>();
         if (impl == "cuda_online")   return std::make_unique<kernelx::SoftmaxCudaOnline>();
         throw std::invalid_argument("unknown softmax implementation: '" + impl + "'");
+    }
+    if (workload == "layernorm") {
+        if (impl == "cpu_reference") return std::make_unique<kernelx::LayerNormCpuReference>();
+        if (impl == "cuda_naive")    return std::make_unique<kernelx::LayerNormCudaNaive>();
+        if (impl == "cuda_welford")  return std::make_unique<kernelx::LayerNormCudaWelford>();
+        throw std::invalid_argument("unknown layernorm implementation: '" + impl + "'");
     }
     throw std::invalid_argument("unknown workload: '" + workload + "'");
 }
