@@ -1,0 +1,166 @@
+#!/bin/bash
+# ─────────────────────────────────────────────────────────────────────────────
+# KernelX — Nsight Compute profiling job (H100)
+#
+# Runs ncu on representative kernels for each workload, parses CSV output
+# via scripts/parse_ncu.py, and appends profile records to
+# profiles/ncu_records.jsonl.
+#
+# Submit:  sbatch slurm/profile_h100.sh
+# Output:  tail -f profile_h100_<JOBID>.out
+# Results: profiles/ncu_records.jsonl
+#
+# Captured metrics per kernel:
+#   Speed-of-Light:   compute %, HBM %, L1 %, L2 %
+#   FLOPs:            fadd + fmul + 2×ffma (→ arithmetic intensity)
+#   HBM traffic:      dram_bytes_read + dram_bytes_write
+#   Occupancy:        achieved %, register/shmem/warp limits
+#   Warp stalls:      long_scoreboard, math_pipe_throttle, mio_throttle
+# ─────────────────────────────────────────────────────────────────────────────
+
+#SBATCH --job-name="kx_profile"
+#SBATCH --output=profile_h100_%j.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=boyea@ad.msoe.edu
+#SBATCH --partition=dgxh100
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:h100:1
+#SBATCH --cpus-per-gpu=8
+#SBATCH --mem=32G
+
+set -euo pipefail
+
+REPO_ROOT="${SLURM_SUBMIT_DIR}"
+BUILD_DIR="${REPO_ROOT}/build_h100"
+BENCH="${BUILD_DIR}/bench"
+PARSE="${REPO_ROOT}/scripts/parse_ncu.py"
+PROFILES_DIR="${REPO_ROOT}/profiles"
+
+module load cuda/12.1
+export CUDACXX="$(which nvcc)"
+
+echo "=== Environment ==="
+srun hostname
+GPU_NAME=$(srun nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+echo "GPU: ${GPU_NAME}"
+date
+echo ""
+
+echo "=== Build ==="
+rm -f "${BUILD_DIR}/CMakeCache.txt"
+rm -rf "${BUILD_DIR}/CMakeFiles"
+mkdir -p "${BUILD_DIR}"
+cd "${BUILD_DIR}"
+cmake "${REPO_ROOT}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=90
+make -j"$(nproc)"
+cd "${REPO_ROOT}"
+echo ""
+
+# Verify ncu is available
+if ! command -v ncu &>/dev/null; then
+    echo "[error] ncu not found — ensure cuda/12.1 is loaded and ncu is in PATH"
+    exit 1
+fi
+echo "=== ncu version ==="
+ncu --version | head -3
+echo ""
+
+mkdir -p "${PROFILES_DIR}"
+
+# ── Metric set ────────────────────────────────────────────────────────────────
+# Speed-of-Light: compute, HBM, L1, L2
+# FLOPs:          fadd, fmul, ffma (2× weight)
+# HBM traffic:    bytes read + write  (→ arithmetic intensity)
+# Occupancy:      achieved %, register/shmem/warp limits
+# Warp stalls:    long_scoreboard (memory dep), math_pipe_throttle, mio_throttle
+NCU_METRICS="sm__throughput.avg.pct_of_peak_sustained_elapsed,\
+gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed,\
+l1tex__throughput.avg.pct_of_peak_sustained_elapsed,\
+lts__throughput.avg.pct_of_peak_sustained_elapsed,\
+sm__sass_thread_inst_executed_op_fadd_pred_on.sum,\
+sm__sass_thread_inst_executed_op_fmul_pred_on.sum,\
+sm__sass_thread_inst_executed_op_ffma_pred_on.sum,\
+dram__bytes_read.sum,\
+dram__bytes_write.sum,\
+sm__warps_active.avg.pct_of_peak_sustained_active,\
+launch__occupancy_limit_registers,\
+launch__occupancy_limit_shared_mem,\
+launch__occupancy_limit_warps,\
+smsp__warp_issue_stall_long_scoreboard_per_warp_active.pct,\
+smsp__warp_issue_stall_math_pipe_throttle_per_warp_active.pct,\
+smsp__warp_issue_stall_mio_throttle_per_warp_active.pct"
+
+# ── Helper: profile one bench invocation ─────────────────────────────────────
+# Usage: profile_kernel <workload> <impl> <m> <n> <k> [dtype]
+profile_kernel() {
+    local workload=$1
+    local impl=$2
+    local m=$3
+    local n=$4
+    local k=$5
+    local dtype=${6:-fp32}
+
+    echo "--- ncu  ${workload} / ${impl}  M=${m} N=${n} K=${k} ---"
+
+    # Run with warmup=0, iterations=1 so ncu captures exactly one kernel set.
+    # --target-processes all ensures ncu also profiles child processes (srun wrapper).
+    # 2>/dev/null suppresses ncu's ==PROF== chatter from the JSON output.
+    ncu \
+        --metrics "${NCU_METRICS}" \
+        --csv --page raw \
+        --target-processes all \
+        "${BENCH}" \
+            --workload  "${workload}" \
+            --implementation "${impl}" \
+            --m "${m}" --n "${n}" --k "${k}" \
+            --dtype "${dtype}" \
+            --warmup 0 --iterations 1 \
+            --no-verify --no-save \
+    2>/dev/null \
+    | python3 "${PARSE}" \
+        --workload  "${workload}" \
+        --implementation "${impl}" \
+        --m "${m}" --n "${n}" --k "${k}" \
+        --dtype "${dtype}" \
+        --gpu  "${GPU_NAME}" \
+        --output "${PROFILES_DIR}/ncu_records.jsonl" \
+    || echo "  [warn] profiling failed for ${workload}/${impl} — skipping"
+
+    echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GEMM — profile N=4096 for the key variants
+# (N=4096 is the regime where bandwidth vs compute tradeoffs are clearest)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "=== Profiling GEMM (N=4096) ==="
+profile_kernel gemm cuda_naive   4096 4096 4096
+profile_kernel gemm cuda_tiled   4096 4096 4096
+profile_kernel gemm cuda_tuned   4096 4096 4096
+profile_kernel gemm cuda_cutlass 4096 4096 4096
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Softmax — M=1024 rows, N=4096 (saturates HBM bandwidth for cuda_online)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "=== Profiling Softmax (M=1024, N=4096) ==="
+profile_kernel softmax cuda_naive  1024 4096 1
+profile_kernel softmax cuda_online 1024 4096 1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LayerNorm — M=1024 rows, N=4096
+# ─────────────────────────────────────────────────────────────────────────────
+echo "=== Profiling LayerNorm (M=1024, N=4096) ==="
+profile_kernel layernorm cuda_naive   1024 4096 1
+profile_kernel layernorm cuda_welford 1024 4096 1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Attention — N=2048 (memory vs compute tradeoff is visible at this size)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "=== Profiling Attention (N=2048, D=64) ==="
+profile_kernel attention cuda_naive 2048 64 1
+profile_kernel attention cuda_flash 2048 64 1
+
+echo "=== Done ==="
+date
+echo "Profile records written to ${PROFILES_DIR}/ncu_records.jsonl"
+echo "Run: python scripts/analyze.py --workload gemm"
