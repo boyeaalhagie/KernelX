@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KernelX — GPU Kernel Performance Engineering</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --accent: #76b900;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --border: #30363d;
+    --blue: #58a6ff;
+    --orange: #f0883e;
+    --green: #3fb950;
+    --purple: #d2a8ff;
+    --red: #ff6b6b;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    --nav-width: 200px;
+    --radius: 8px;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── LAYOUT ── */
+  .page-wrapper {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--nav-width);
+    height: 100vh;
+    background: var(--card);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    overflow-y: auto;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-logo {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+
+  .sidebar-logo span {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+  }
+
+  .nav-links {
+    list-style: none;
+    padding: 0 8px;
+    flex: 1;
+  }
+
+  .nav-links li a {
+    display: block;
+    padding: 7px 12px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+
+  .nav-links li a:hover,
+  .nav-links li a.active {
+    color: var(--text);
+    background: rgba(118, 185, 0, 0.12);
+  }
+
+  .nav-links li a.active {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .main-content {
+    margin-left: var(--nav-width);
+    flex: 1;
+    max-width: 960px;
+    padding: 0 48px 80px;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    padding: 72px 0 56px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .hero-eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  .hero h1 {
+    font-size: 52px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    line-height: 1.1;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+
+  .hero h1 span { color: var(--accent); }
+
+  .hero-subtitle {
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+
+  .hero-desc {
+    font-size: 15px;
+    color: var(--muted);
+    max-width: 640px;
+    line-height: 1.7;
+    margin-bottom: 36px;
+  }
+
+  .stat-cards {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    min-width: 160px;
+  }
+
+  .stat-card .stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-card .stat-label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .stack-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .tag {
+    background: rgba(118, 185, 0, 0.1);
+    border: 1px solid rgba(118, 185, 0, 0.3);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-family: var(--font-mono);
+  }
+
+  /* ── SECTIONS ── */
+  section {
+    padding: 64px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  section:last-of-type { border-bottom: none; }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  h2 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+
+  p {
+    color: var(--muted);
+    margin-bottom: 16px;
+    line-height: 1.75;
+  }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+  }
+
+  .card-grid .card h3 {
+    font-size: 14px;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+
+  .card-grid .card p {
+    font-size: 13px;
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  .insight-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin: 24px 0;
+  }
+
+  .insight-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .insight-card .badge {
+    background: rgba(118, 185, 0, 0.15);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .insight-card p {
+    font-size: 13px;
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  .callout {
+    background: rgba(88, 166, 255, 0.07);
+    border: 1px solid rgba(88, 166, 255, 0.25);
+    border-left: 3px solid var(--blue);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin: 24px 0;
+  }
+
+  .callout.important {
+    background: rgba(118, 185, 0, 0.07);
+    border: 1px solid rgba(118, 185, 0, 0.25);
+    border-left: 3px solid var(--accent);
+  }
+
+  .callout h4 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: 8px;
+  }
+
+  .callout.important h4 { color: var(--accent); }
+
+  .callout p {
+    font-size: 13px;
+    margin: 0;
+    line-height: 1.7;
+  }
+
+  /* ── CHART CONTAINERS ── */
+  .chart-wrap {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin: 24px 0;
+    position: relative;
+  }
+
+  .chart-wrap canvas {
+    max-height: 320px;
+  }
+
+  .chart-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-bottom: 16px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.3px;
+  }
+
+  /* ── TABLES ── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 24px 0;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead tr {
+    background: rgba(118, 185, 0, 0.08);
+    border-bottom: 1px solid var(--border);
+  }
+
+  thead th {
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+
+  tbody tr:last-child { border-bottom: none; }
+
+  tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+
+  tbody td {
+    padding: 10px 16px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  tbody td:first-child {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .best td { color: var(--accent) !important; }
+  .best td:first-child { color: var(--accent) !important; }
+
+  /* ── CODE ── */
+  pre {
+    background: #010409;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 24px 0;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: #c9d1d9;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    background: rgba(110, 118, 129, 0.15);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  /* ── METHODOLOGY STEPS ── */
+  .method-steps {
+    display: flex;
+    gap: 0;
+    margin: 24px 0;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .method-step {
+    flex: 1;
+    min-width: 110px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    padding: 16px 14px;
+    text-align: center;
+    position: relative;
+  }
+
+  .method-step:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .method-step:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+
+  .method-step + .method-step { border-left: none; }
+
+  .method-step .step-num {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .method-step .step-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .method-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+    color: var(--border);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .layers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin: 24px 0;
+  }
+
+  .layer-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+  }
+
+  .layer-num {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .layer-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+
+  .layer-desc {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  /* ── FOOTER ── */
+  footer {
+    padding: 40px 48px;
+    margin-left: var(--nav-width);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: gap;
+    gap: 16px;
+  }
+
+  footer .footer-left {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  footer .footer-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  footer .footer-hw {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+
+  footer a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1px solid rgba(118, 185, 0, 0.35);
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  footer a:hover { background: rgba(118, 185, 0, 0.1); }
+
+  /* ── MOBILE ── */
+  @media (max-width: 768px) {
+    .sidebar {
+      position: static;
+      width: 100%;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      flex-direction: row;
+      padding: 12px 0;
+      overflow-x: auto;
+    }
+
+    .sidebar-logo { border-bottom: none; margin-bottom: 0; padding: 0 16px; border-right: 1px solid var(--border); flex-shrink: 0; }
+
+    .nav-links { display: flex; flex-direction: row; padding: 0 8px; gap: 2px; overflow-x: auto; white-space: nowrap; }
+
+    .page-wrapper { flex-direction: column; }
+
+    .main-content {
+      margin-left: 0;
+      padding: 0 20px 60px;
+    }
+
+    footer {
+      margin-left: 0;
+      padding: 32px 20px;
+    }
+
+    .hero h1 { font-size: 36px; }
+    .hero-subtitle { font-size: 16px; }
+
+    .stat-cards { gap: 12px; }
+
+    .method-steps { flex-direction: column; }
+    .method-step:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+    .method-step:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+    .method-step + .method-step { border-left: 1px solid var(--border); border-top: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- SIDEBAR NAV -->
+  <nav class="sidebar" aria-label="Section navigation">
+    <div class="sidebar-logo"><span>KernelX</span></div>
+    <ul class="nav-links" id="nav-links">
+      <li><a href="#overview" class="active">Overview</a></li>
+      <li><a href="#gemm">GEMM</a></li>
+      <li><a href="#softmax">Softmax</a></li>
+      <li><a href="#layernorm">LayerNorm</a></li>
+      <li><a href="#attention">Attention</a></li>
+      <li><a href="#reduction">Reduction</a></li>
+      <li><a href="#datamovement">Data Movement</a></li>
+      <li><a href="#infrastructure">Infrastructure</a></li>
+    </ul>
+  </nav>
+
+  <div class="main-content">
+
+    <!-- HERO -->
+    <header class="hero" id="hero">
+      <div class="hero-eyebrow">Performance Engineering</div>
+      <h1>Kernel<span>X</span></h1>
+      <div class="hero-subtitle">GPU Kernel Performance Engineering on NVIDIA H100</div>
+      <p class="hero-desc">
+        A ground-up platform for benchmarking, profiling, and systematically optimizing CUDA kernels — built to answer: why is this kernel performing the way it is, and what change actually makes it faster?
+      </p>
+      <div class="stat-cards">
+        <div class="stat-card">
+          <div class="stat-value">32.6×</div>
+          <div class="stat-label">GEMM speedup over naive</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">6</div>
+          <div class="stat-label">workloads profiled</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">Nsight</div>
+          <div class="stat-label">Systems pipeline</div>
+        </div>
+      </div>
+      <div class="stack-tags">
+        <span class="tag">CUDA C++</span>
+        <span class="tag">CUTLASS</span>
+        <span class="tag">Triton</span>
+        <span class="tag">Nsight Systems</span>
+        <span class="tag">Python</span>
+        <span class="tag">SLURM</span>
+        <span class="tag">H100</span>
+      </div>
+    </header>
+
+    <!-- OVERVIEW -->
+    <section id="overview">
+      <div class="section-label">Methodology</div>
+      <h2>Four-Layer Architecture</h2>
+      <p>
+        KernelX is structured around a repeating engineering loop: start with a correct baseline, profile to find the actual bottleneck, implement a targeted fix, measure the delta. Each workload progresses from naive through hardware-aware implementations, with Nsight Systems confirming (or refuting) the hypothesis at each step.
+      </p>
+
+      <div class="layers-grid">
+        <div class="layer-card">
+          <div class="layer-num">Layer 1</div>
+          <div class="layer-title">Workloads</div>
+          <div class="layer-desc">Six fundamental GPU computation types: GEMM, Softmax, LayerNorm, Attention, Reduction, Data Movement.</div>
+        </div>
+        <div class="layer-card">
+          <div class="layer-num">Layer 2</div>
+          <div class="layer-title">Implementations</div>
+          <div class="layer-desc">Naive → tiled → register-blocked → library (CUTLASS) → Triton, with each step motivated by a measured bottleneck.</div>
+        </div>
+        <div class="layer-card">
+          <div class="layer-num">Layer 3</div>
+          <div class="layer-title">Performance Analysis</div>
+          <div class="layer-desc">Nsight Systems kernel timing, CUDA API overhead, PCIe bandwidth, arithmetic intensity vs roofline.</div>
+        </div>
+        <div class="layer-card">
+          <div class="layer-num">Layer 4</div>
+          <div class="layer-title">Engineering Infrastructure</div>
+          <div class="layer-desc">Reproducible benchmark runner, canonical JSONL records tagged with git commit + GPU, SLURM automation, regression detection.</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 32px;">The Optimization Loop</h3>
+      <div class="method-steps">
+        <div class="method-step"><div class="step-num">1</div><div class="step-label">Baseline</div></div>
+        <div class="method-step"><div class="step-num">2</div><div class="step-label">Profile</div></div>
+        <div class="method-step"><div class="step-num">3</div><div class="step-label">Identify Bottleneck</div></div>
+        <div class="method-step"><div class="step-num">4</div><div class="step-label">Implement Fix</div></div>
+        <div class="method-step"><div class="step-num">5</div><div class="step-label">Measure</div></div>
+        <div class="method-step"><div class="step-num">6</div><div class="step-label">Repeat</div></div>
+      </div>
+      <p style="font-size: 13px; margin-top: 8px;">
+        Every claim about performance is backed by a timing measurement. Every optimization decision is motivated by a profiler observation, not intuition.
+      </p>
+    </section>
+
+    <!-- GEMM -->
+    <section id="gemm">
+      <div class="section-label">Workload 1</div>
+      <h2>GEMM — Matrix Multiplication</h2>
+      <p>
+        General matrix multiplication (C = A × B, M=N=K, fp32) is the most compute-intensive primitive in deep learning. The progression from a naive global-memory kernel to CUTLASS TF32 Tensor Cores spans a 32.6× wall-clock improvement — each step motivated by a specific hardware constraint on the H100.
+      </p>
+
+      <div class="chart-wrap">
+        <div class="chart-title">GEMM throughput by matrix size (TFLOP/s)</div>
+        <canvas id="gemmChart"></canvas>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Implementation</th>
+              <th>Kernel Time (N=4096)</th>
+              <th>TFLOP/s</th>
+              <th>Speedup</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>cuda_naive</td><td>26.3 ms</td><td>5.2</td><td>1× baseline</td></tr>
+            <tr><td>cuda_tiled</td><td>15.6 ms</td><td>8.8</td><td>1.7×</td></tr>
+            <tr><td>cuda_tuned</td><td>6.5 ms</td><td>21.1</td><td>4.1×</td></tr>
+            <tr><td>Triton</td><td>0.99 ms</td><td>139.5</td><td>26.8×</td></tr>
+            <tr class="best"><td>CUTLASS</td><td>0.81 ms</td><td>169.3</td><td>32.6×</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="insight-cards">
+        <div class="insight-card">
+          <span class="badge">naive</span>
+          <p>O(2N) global loads per output element. Every thread reads full rows and columns independently with no data reuse. L2 miss-dominated — most cycles stall waiting on HBM.</p>
+        </div>
+        <div class="insight-card">
+          <span class="badge">tiled</span>
+          <p>Shared memory tiling with 32×32 blocks. Global traffic drops to O(2N/tile) — threads in the same block cooperatively load a tile once and reuse it T times. 1.7× speedup.</p>
+        </div>
+        <div class="insight-card">
+          <span class="badge">tuned</span>
+          <p>Register-blocked accumulator (8×8 per thread), <code>float4</code> vectorized loads, fully unrolled inner loop. Kernel is now compute-bound above the ridge point. 4.1× speedup.</p>
+        </div>
+        <div class="insight-card">
+          <span class="badge">CUTLASS</span>
+          <p>TF32 Tensor Cores via <code>mma.sync</code>, multi-stage software pipeline (<code>cp.async</code> + <code>ldmatrix</code>) overlaps memory and compute. Near H100 FP32 peak. 32.6×.</p>
+        </div>
+        <div class="insight-card">
+          <span class="badge">Triton</span>
+          <p>Autotuner selects tile dimensions, block sizes, and pipeline depth at compile time. Comparable to CUTLASS at large N; gap closes as matrix size grows.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SOFTMAX -->
+    <section id="softmax">
+      <div class="section-label">Workload 2</div>
+      <h2>Softmax</h2>
+      <p>
+        Softmax over rows of a [4096, 4096] matrix. The naive implementation provisions 1024 threads per row but all threads block waiting on a global max broadcast — synchronization cost dominates the actual arithmetic.
+      </p>
+
+      <div class="chart-wrap">
+        <div class="chart-title">Softmax kernel time — naive vs online (N=4096, ms, lower is better)</div>
+        <canvas id="softmaxChart"></canvas>
+      </div>
+
+      <div class="callout">
+        <h4>300× Faster</h4>
+        <p>
+          The online warp kernel (Milakov &amp; Gimelshein 2018) assigns one warp per row, computes <code>(m, d)</code> simultaneously using warp butterfly <code>__shfl_down_sync</code>, and completes in a single pass with no <code>__syncthreads</code>. The naive kernel's bottleneck is not arithmetic — it is the global synchronization point that serializes all 1024 threads into a broadcast that could be done by a single warp.
+        </p>
+      </div>
+    </section>
+
+    <!-- LAYERNORM -->
+    <section id="layernorm">
+      <div class="section-label">Workload 3</div>
+      <h2>LayerNorm</h2>
+      <p>
+        Layer normalization over a [4096, 4096] matrix (normalize each row). The naive implementation requires three separate HBM passes; the Welford online algorithm collapses them.
+      </p>
+
+      <div class="chart-wrap">
+        <div class="chart-title">LayerNorm kernel time — naive vs Welford (N=4096, ms, lower is better)</div>
+        <canvas id="layernormChart"></canvas>
+      </div>
+
+      <div class="callout">
+        <h4>180× Faster — Why?</h4>
+        <p>
+          The naive kernel reads X twice (once for mean, once for variance) then writes Y — three HBM passes. Welford's online algorithm computes mean and M₂ simultaneously in a single forward sweep — two HBM passes total. At this problem size the dominant cost is not arithmetic but over-provisioning: a 1024-thread block processes 4096 elements while most threads idle in the reduction phase. The Welford kernel assigns one warp per row and completes the same work with 32 active threads instead of 1024.
+        </p>
+      </div>
+    </section>
+
+    <!-- ATTENTION -->
+    <section id="attention">
+      <div class="section-label">Workload 4</div>
+      <h2>Attention — FlashAttention</h2>
+      <p>
+        Self-attention (Q, K, V ∈ R^{N×64}, fp32/fp16, head_dim=64). The naive O(N²) algorithm materializes the full N×N attention matrix in HBM. FlashAttention rewrites the computation in tiles to avoid HBM materialization entirely.
+      </p>
+
+      <div class="chart-wrap">
+        <div class="chart-title">Attention throughput by sequence length (TFLOP/s)</div>
+        <canvas id="attnChart"></canvas>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Implementation</th>
+              <th>N=2048 Kernel</th>
+              <th>N=4096 Kernel</th>
+              <th>Speedup vs Naive (N=4096)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>cuda_naive</td><td>1.100 ms</td><td>4.327 ms</td><td>1×</td></tr>
+            <tr><td>cuda_flash</td><td>0.253 ms</td><td>0.507 ms</td><td>8.5×</td></tr>
+            <tr class="best"><td>cuda_flash_fp16</td><td>0.247 ms</td><td>0.492 ms</td><td>8.8×</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout important">
+        <h4>Key Engineering Insight — FP16 Underperforms Despite Lower Memory Traffic</h4>
+        <p>
+          FP16 FlashAttention is 3–32% <em>slower</em> than FP32 despite halved memory traffic. At peak 7.8 TFLOP/s the kernel operates at 13% of H100's FP32 ceiling — it is <strong>compute-bound</strong>, not memory-bound. FP16's bandwidth advantage is irrelevant until the kernel saturates the 3.35 TB/s HBM roofline. Nsight Systems confirms: FP16 H2D footprint is exactly half (1.6 MB vs 3.1 MB at N=4096), but kernel time barely changes. The only path to FP16 winning is Tensor Cores (WMMA), which shifts the compute ceiling to ~312 TFLOP/s — a potential 40× over current throughput.
+        </p>
+      </div>
+    </section>
+
+    <!-- REDUCTION -->
+    <section id="reduction">
+      <div class="section-label">Workload 5</div>
+      <h2>Reduction</h2>
+      <p>
+        Parallel sum reduction across arrays of size N. Demonstrates the latency-vs-bandwidth regime transition that governs whether a synchronization optimization is visible in wall-clock time.
+      </p>
+
+      <div class="chart-wrap">
+        <div class="chart-title">Reduction kernel time vs N (ms, lower is better)</div>
+        <canvas id="reduceChart"></canvas>
+      </div>
+
+      <div class="callout">
+        <h4>Latency vs Bandwidth Regimes</h4>
+        <p>
+          Warp-shuffle elimination of <code>__syncthreads</code> barriers helps at small N, where the kernel is in the <em>latency regime</em> — synchronization overhead is a meaningful fraction of total time. At large N both implementations converge because the kernel becomes HBM-bandwidth-bound: arithmetic intensity ≈ 0.25 FLOP/byte, well below the ridge point. No amount of intra-block optimization changes the dominant cost once the kernel is waiting on memory bandwidth.
+        </p>
+      </div>
+    </section>
+
+    <!-- DATA MOVEMENT -->
+    <section id="datamovement">
+      <div class="section-label">Workload 6</div>
+      <h2>Data Movement — PCIe Transfer</h2>
+      <p>
+        Host-to-device transfer benchmarks quantifying the cost of different allocation strategies at 256 MB. Understanding PCIe behavior is a prerequisite for accurate end-to-end profiling.
+      </p>
+
+      <div class="chart-wrap">
+        <div class="chart-title">H2D bandwidth by transfer type (GB/s, 256 MB)</div>
+        <canvas id="dmChart"></canvas>
+      </div>
+
+      <div class="callout">
+        <h4>Why Pinned Memory Is ~5.6× Faster Than Pageable</h4>
+        <p>
+          Pageable transfers require CUDA to stage data through an internal pinned bounce buffer before the DMA engine can initiate — adding a CPU memcpy to the critical path. <code>cudaMallocHost</code> allocates page-locked memory that the DMA engine reads directly at near-PCIe ceiling. Bidirectional throughput exceeds the unidirectional peak because PCIe is full-duplex: upstream (H2D) and downstream (D2H) lanes operate independently with separate DMA engines, summing to 86.8 GB/s combined.
+        </p>
+      </div>
+    </section>
+
+    <!-- INFRASTRUCTURE -->
+    <section id="infrastructure">
+      <div class="section-label">Engineering Infrastructure</div>
+      <h2>Benchmarking &amp; Profiling Pipeline</h2>
+      <p>
+        Results are only as trustworthy as the measurement infrastructure. KernelX treats the benchmark runner and profiling pipeline as first-class engineering artifacts.
+      </p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h3>Benchmark Runner</h3>
+          <p>CUDA event timing with configurable warmup and iteration counts. Reports median, P95, and TFLOP/s. All results written to canonical JSONL records tagged with git commit hash, GPU model, and timestamp.</p>
+        </div>
+        <div class="card">
+          <h3>Nsight Systems Pipeline</h3>
+          <p><code>profile_nsys.sh</code> sweeps all workloads. <code>parse_nsys.py</code> extracts kernel timing from <code>--stats=true</code> tables into <code>nsys_records.jsonl</code>, integrated into <code>analyze.py</code>.</p>
+        </div>
+        <div class="card">
+          <h3>Regression Detection</h3>
+          <p><code>compare.py</code> flags when a code change degrades performance vs the canonical record — prevents inadvertent regressions from surviving a commit.</p>
+        </div>
+        <div class="card">
+          <h3>SLURM Integration</h3>
+          <p>Real HPC cluster (MSOE ROSIE), H100 dgxh100 partition. Automated build + profile in a single job submission. Results pull back via SLURM output files.</p>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 32px; margin-bottom: 12px;">Sample <code>analyze.py</code> Output — GEMM</h3>
+<pre>
+  ════════════════════════════════════════════════════════════════════
+  GEMM  M=N=K=4096  fp32  — NVIDIA H100 80GB HBM3
+  ════════════════════════════════════════════════════════════════════
+
+  Benchmark Results
+  ────────────────────────────────────────────────────────────────────
+
+  Implementation        Median       P95   TFLOP/s   Speedup
+  ────────────────────────────────────────────────────────────
+  cuda_naive           26.441ms   26.453ms     5.198  baseline
+  cuda_tiled           15.552ms   15.562ms     8.837      1.7×
+  cuda_tuned            6.515ms    6.539ms    21.096      4.1×
+  triton                0.985ms    1.011ms   139.513     26.8×
+  cuda_cutlass          0.812ms    0.863ms   169.280     32.6×
+
+  Nsight Systems Profile — cuda_cutlass
+  ────────────────────────────────────────────────────────────────────
+
+  Kernel:  MmaMultistage
+  Timing (ms)   avg 0.805   med 0.804   min 0.801   max 0.814   × 13 launches
+  API overhead: 240.262 ms total CUDA API time
+  H2D:  134.2 MB  in 18.143 ms  (7.4 GB/s)
+</pre>
+    </section>
+
+  </div><!-- .main-content -->
+</div><!-- .page-wrapper -->
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-left">
+    <span class="footer-name">Alex Boye</span>
+    <span class="footer-hw">Built on MSOE ROSIE — NVIDIA H100 80GB HBM3</span>
+  </div>
+  <a href="https://github.com/boyea/KernelX" target="_blank" rel="noopener">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+    </svg>
+    boyea/KernelX
+  </a>
+</footer>
+
+<script>
+// ── CHART DEFAULTS ──────────────────────────────────────────────────
+Chart.defaults.color = '#8b949e';
+Chart.defaults.borderColor = '#30363d';
+Chart.defaults.font.family = "'JetBrains Mono', 'Fira Code', Consolas, monospace";
+Chart.defaults.font.size = 11;
+
+const COLORS = {
+  naive:   '#58a6ff',
+  tiled:   '#f0883e',
+  tuned:   '#3fb950',
+  triton:  '#d2a8ff',
+  cutlass: '#76b900',
+  red:     '#ff6b6b',
+  muted:   '#8b949e',
+  flash:   '#76b900',
+  fp16:    '#d2a8ff',
+  warp:    '#76b900',
+};
+
+function baseOptions(extraScales) {
+  return {
+    responsive: true,
+    maintainAspectRatio: true,
+    animation: { duration: 600 },
+    plugins: {
+      legend: {
+        labels: { color: '#e6edf3', boxWidth: 12, padding: 16, font: { size: 11 } }
+      },
+      tooltip: {
+        backgroundColor: '#161b22',
+        borderColor: '#30363d',
+        borderWidth: 1,
+        titleColor: '#e6edf3',
+        bodyColor: '#8b949e',
+      }
+    },
+    scales: Object.assign({
+      x: {
+        grid: { color: '#21262d' },
+        ticks: { color: '#8b949e' }
+      },
+      y: {
+        grid: { color: '#21262d' },
+        ticks: { color: '#8b949e' }
+      }
+    }, extraScales || {})
+  };
+}
+
+// ── GEMM CHART ──────────────────────────────────────────────────────
+(function() {
+  const labels = ['512', '1024', '2048', '4096'];
+  const roofline = new Array(labels.length).fill(60);
+
+  const ctx = document.getElementById('gemmChart');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'cuda_naive',
+          data: [4.476, 5.106, 5.481, 5.198],
+          borderColor: COLORS.naive, backgroundColor: COLORS.naive + '22',
+          tension: 0.3, pointRadius: 4,
+        },
+        {
+          label: 'cuda_tiled',
+          data: [7.326, 8.860, 9.058, 8.837],
+          borderColor: COLORS.tiled, backgroundColor: COLORS.tiled + '22',
+          tension: 0.3, pointRadius: 4,
+        },
+        {
+          label: 'cuda_tuned',
+          data: [6.554, 18.492, 21.678, 21.096],
+          borderColor: COLORS.tuned, backgroundColor: COLORS.tuned + '22',
+          tension: 0.3, pointRadius: 4,
+        },
+        {
+          label: 'Triton',
+          data: [6.738, 49.747, 130.214, 139.513],
+          borderColor: COLORS.triton, backgroundColor: COLORS.triton + '22',
+          tension: 0.3, pointRadius: 4,
+        },
+        {
+          label: 'CUTLASS',
+          data: [12.400, 59.388, 157.233, 169.280],
+          borderColor: COLORS.cutlass, backgroundColor: COLORS.cutlass + '22',
+          tension: 0.3, pointRadius: 4, borderWidth: 2,
+        },
+        {
+          label: 'H100 FP32 peak (60 TFLOP/s)',
+          data: roofline,
+          borderColor: COLORS.red,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          borderWidth: 1.5,
+          fill: false,
+        },
+      ]
+    },
+    options: Object.assign(baseOptions(), {
+      scales: {
+        x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' },
+              title: { display: true, text: 'Matrix size N (N×N×N)', color: '#8b949e' } },
+        y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' },
+              title: { display: true, text: 'TFLOP/s', color: '#8b949e' } }
+      }
+    })
+  });
+})();
+
+// ── SOFTMAX CHART ───────────────────────────────────────────────────
+(function() {
+  const ctx = document.getElementById('softmaxChart');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['cuda_naive', 'cuda_online'],
+      datasets: [{
+        label: 'Kernel time (ms)',
+        data: [3.307, 0.011],
+        backgroundColor: [COLORS.naive + 'cc', COLORS.cutlass + 'cc'],
+        borderColor: [COLORS.naive, COLORS.cutlass],
+        borderWidth: 1,
+        borderRadius: 4,
+      }]
+    },
+    options: Object.assign(baseOptions(), {
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+          titleColor: '#e6edf3', bodyColor: '#8b949e',
+          callbacks: { label: ctx => ctx.parsed.y.toFixed(3) + ' ms' }
+        }
+      },
+      scales: {
+        x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' } },
+        y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' },
+              title: { display: true, text: 'Kernel time (ms, lower is better)', color: '#8b949e' } }
+      }
+    })
+  });
+})();
+
+// ── LAYERNORM CHART ─────────────────────────────────────────────────
+(function() {
+  const ctx = document.getElementById('layernormChart');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['cuda_naive', 'cuda_welford'],
+      datasets: [{
+        label: 'Kernel time (ms)',
+        data: [2.525, 0.014],
+        backgroundColor: [COLORS.naive + 'cc', COLORS.cutlass + 'cc'],
+        borderColor: [COLORS.naive, COLORS.cutlass],
+        borderWidth: 1,
+        borderRadius: 4,
+      }]
+    },
+    options: Object.assign(baseOptions(), {
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+          titleColor: '#e6edf3', bodyColor: '#8b949e',
+          callbacks: { label: ctx => ctx.parsed.y.toFixed(3) + ' ms' }
+        }
+      },
+      scales: {
+        x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' } },
+        y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' },
+              title: { display: true, text: 'Kernel time (ms, lower is better)', color: '#8b949e' } }
+      }
+    })
+  });
+})();
+
+// ── ATTENTION CHART ─────────────────────────────────────────────────
+(function() {
+  const labels = ['512', '1024', '2048', '4096', '8192'];
+  const ctx = document.getElementById('attnChart');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'cuda_naive',
+          data: [0.526, 0.727, 0.842, 0.883, 0.897],
+          borderColor: COLORS.naive, backgroundColor: COLORS.naive + '22',
+          tension: 0.3, pointRadius: 4,
+        },
+        {
+          label: 'cuda_flash (fp32)',
+          data: [0.733, 1.608, 3.394, 7.070, 7.840],
+          borderColor: COLORS.flash, backgroundColor: COLORS.flash + '22',
+          tension: 0.3, pointRadius: 4, borderWidth: 2,
+        },
+        {
+          label: 'cuda_flash_fp16',
+          data: [0.519, 1.125, 2.297, 4.797, 6.205],
+          borderColor: COLORS.fp16, backgroundColor: COLORS.fp16 + '22',
+          tension: 0.3, pointRadius: 4,
+        },
+      ]
+    },
+    options: Object.assign(baseOptions(), {
+      scales: {
+        x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' },
+              title: { display: true, text: 'Sequence length N', color: '#8b949e' } },
+        y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' },
+              title: { display: true, text: 'TFLOP/s', color: '#8b949e' } }
+      }
+    })
+  });
+})();
+
+// ── REDUCTION CHART ─────────────────────────────────────────────────
+(function() {
+  const labels = ['256', '1K', '4K', '16K', '64K', '131K'];
+  const ctx = document.getElementById('reduceChart');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'cuda_naive',
+          data: [0.022, 0.023, 0.023, 0.044, 0.108, 0.192],
+          borderColor: COLORS.naive, backgroundColor: COLORS.naive + '22',
+          tension: 0.3, pointRadius: 4,
+        },
+        {
+          label: 'cuda_warp',
+          data: [0.023, 0.022, 0.023, 0.043, 0.106, 0.192],
+          borderColor: COLORS.warp, backgroundColor: COLORS.warp + '22',
+          tension: 0.3, pointRadius: 4,
+        },
+      ]
+    },
+    options: Object.assign(baseOptions(), {
+      scales: {
+        x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' },
+              title: { display: true, text: 'Array size N', color: '#8b949e' } },
+        y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' },
+              title: { display: true, text: 'Kernel time (ms, lower is better)', color: '#8b949e' } }
+      }
+    })
+  });
+})();
+
+// ── DATA MOVEMENT CHART ─────────────────────────────────────────────
+(function() {
+  const ctx = document.getElementById('dmChart');
+
+  // Plugin to draw reference line
+  const refLinePlugin = {
+    id: 'refLine',
+    afterDraw(chart) {
+      const { ctx: c, chartArea, scales } = chart;
+      const val = 64;
+      const x = scales.x.getPixelForValue(val);
+      if (x < chartArea.left || x > chartArea.right) return;
+      c.save();
+      c.strokeStyle = COLORS.red;
+      c.lineWidth = 1.5;
+      c.setLineDash([6, 4]);
+      c.beginPath();
+      c.moveTo(x, chartArea.top);
+      c.lineTo(x, chartArea.bottom);
+      c.stroke();
+      c.fillStyle = COLORS.red;
+      c.font = '10px monospace';
+      c.textAlign = 'left';
+      c.fillText('PCIe 5.0 ×16 unidirectional peak (64 GB/s)', x + 6, chartArea.top + 14);
+      c.restore();
+    }
+  };
+
+  new Chart(ctx, {
+    type: 'bar',
+    plugins: [refLinePlugin],
+    data: {
+      labels: ['pageable', 'pinned', 'pinned_async', 'bidirectional'],
+      datasets: [{
+        label: 'Bandwidth (GB/s)',
+        data: [10.0, 55.8, 55.7, 86.8],
+        backgroundColor: [
+          COLORS.naive + 'cc',
+          COLORS.tiled + 'cc',
+          COLORS.tuned + 'cc',
+          COLORS.cutlass + 'cc',
+        ],
+        borderColor: [COLORS.naive, COLORS.tiled, COLORS.tuned, COLORS.cutlass],
+        borderWidth: 1,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: true,
+      animation: { duration: 600 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+          titleColor: '#e6edf3', bodyColor: '#8b949e',
+          callbacks: { label: ctx => ctx.parsed.x.toFixed(1) + ' GB/s' }
+        }
+      },
+      scales: {
+        y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e' } },
+        x: {
+          grid: { color: '#21262d' },
+          ticks: { color: '#8b949e' },
+          title: { display: true, text: 'Bandwidth (GB/s, higher is better)', color: '#8b949e' },
+          max: 100,
+        }
+      }
+    }
+  });
+})();
+
+// ── ACTIVE NAV ON SCROLL ────────────────────────────────────────────
+(function() {
+  const sections = document.querySelectorAll('section[id], header[id]');
+  const links = document.querySelectorAll('#nav-links a');
+
+  function getActive() {
+    const offset = 120;
+    let active = null;
+    sections.forEach(sec => {
+      if (sec.getBoundingClientRect().top <= offset) {
+        active = sec.id;
+      }
+    });
+    return active;
+  }
+
+  function update() {
+    const id = getActive();
+    links.forEach(a => {
+      const href = a.getAttribute('href').slice(1);
+      a.classList.toggle('active', href === id);
+    });
+  }
+
+  document.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
