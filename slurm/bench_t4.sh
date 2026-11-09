@@ -72,6 +72,25 @@ for SIZE in "${SIZES[@]}"; do
 done
 
 echo ""
+echo "=== Softmax Benchmarks (T4) ==="
+SOFTMAX_SIZES=(1024 4096 8192 32768)
+SOFTMAX_IMPLS=(cuda_naive cuda_online)
+
+for N_SIZE in "${SOFTMAX_SIZES[@]}"; do
+    for IMPL in "${SOFTMAX_IMPLS[@]}"; do
+        echo "--- Softmax ${IMPL}  M=1024 N=${N_SIZE} ---"
+        srun "${BENCH}" \
+            --workload softmax \
+            --implementation "${IMPL}" \
+            --m 1024 --n "${N_SIZE}" --k 1 \
+            --dtype fp32 \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify
+    done
+done
+
+echo ""
 echo "=== GEMM Benchmarks — Triton V5 (T4) ==="
 VENV="${REPO_ROOT}/.venv_triton"
 _triton_ready=false

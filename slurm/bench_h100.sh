@@ -70,6 +70,26 @@ for SIZE in "${SIZES[@]}"; do
 done
 
 echo ""
+echo "=== Softmax Benchmarks (H100) ==="
+# M=1024 rows (batch × heads); N varies from 1K to 128K (seq len / vocab size)
+SOFTMAX_SIZES=(1024 4096 8192 32768 131072)
+SOFTMAX_IMPLS=(cuda_naive cuda_online)
+
+for N_SIZE in "${SOFTMAX_SIZES[@]}"; do
+    for IMPL in "${SOFTMAX_IMPLS[@]}"; do
+        echo "--- Softmax ${IMPL}  M=1024 N=${N_SIZE} ---"
+        srun "${BENCH}" \
+            --workload softmax \
+            --implementation "${IMPL}" \
+            --m 1024 --n "${N_SIZE}" --k 1 \
+            --dtype fp32 \
+            --warmup "${WARMUP}" \
+            --iterations "${ITERS}" \
+            --no-verify
+    done
+done
+
+echo ""
 echo "=== GEMM Benchmarks — Triton V5 (H100) ==="
 # Triton needs PyTorch.  Set up a venv on first run; reuse on subsequent runs.
 # --system-site-packages picks up any cluster-wide torch/triton if present.
