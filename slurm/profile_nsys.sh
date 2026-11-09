@@ -79,12 +79,12 @@ profile_kernel() {
 
     # warmup=3 iterations=10: nsys stats will cover all 10 timed launches;
     # the summary table averages them, giving stable timing.
+    # Note: --quiet is intentionally omitted — it suppresses --stats=true output.
     timeout 90s "${NSYS}" profile \
         --trace=cuda \
         --stats=true \
         --output="${nsys_tmp}" \
         --force-overwrite=true \
-        --quiet \
         "${BENCH}" \
             --workload  "${workload}" \
             --implementation "${impl}" \
