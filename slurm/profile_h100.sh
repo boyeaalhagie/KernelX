@@ -146,7 +146,10 @@ profile_kernel() {
     # Run with warmup=0, iterations=1 so ncu captures exactly one kernel set.
     # --target-processes all is required because SLURM runs bench as a child
     # process of the job script shell.
-    # stderr goes to stdout (2>&1) so ncu errors appear in the job log.
+    # Raw ncu output saved to tmp file so we can inspect it on parse failure.
+    local ncu_tmp
+    ncu_tmp="$(mktemp /tmp/ncu_XXXXXX.csv)"
+
     "${NCU}" \
         --metrics "${NCU_METRICS}" \
         --csv --page raw \
@@ -158,15 +161,22 @@ profile_kernel() {
             --dtype "${dtype}" \
             --warmup 0 --iterations 1 \
             --no-verify --no-save \
-    2>&1 \
-    | python3 "${PARSE}" \
+    > "${ncu_tmp}" 2>&1
+
+    echo "  [ncu raw] $(wc -l < "${ncu_tmp}") lines, first 5:"
+    head -5 "${ncu_tmp}" | sed 's/^/    /'
+
+    python3 "${PARSE}" \
         --workload  "${workload}" \
         --implementation "${impl}" \
         --m "${m}" --n "${n}" --k "${k}" \
         --dtype "${dtype}" \
         --gpu  "${GPU_NAME}" \
         --output "${PROFILES_DIR}/ncu_records.jsonl" \
+        < "${ncu_tmp}" \
     || echo "  [warn] profiling failed for ${workload}/${impl} — skipping"
+
+    rm -f "${ncu_tmp}"
 
     echo ""
 }
