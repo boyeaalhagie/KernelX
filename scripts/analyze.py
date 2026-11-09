@@ -175,25 +175,31 @@ _INSIGHTS: dict[tuple, dict] = {
             "advantage grows quadratically with N."
         ),
         "next": (
-            "FP16 inputs + Tensor Core accumulation: flash_fp16 would yield "
-            "~8× additional compute throughput.  Multi-head batching: combine H "
-            "heads across the batch dimension for better SM utilisation."
+            "cuda_flash_fp16 halves HBM traffic but is still slower (0.68–0.79×) "
+            "because the kernel is compute-bound at 13% of FP32 peak — the memory "
+            "roof is not yet the bottleneck.  Real FP16 gains require Tensor Cores "
+            "(WMMA), which shifts the compute roof to ~312 TFLOP/s."
         ),
     },
     ("attention", "cuda_flash_fp16"): {
         "observed": (
-            "Mixed-precision FlashAttention: Q/K/V/O stored as __half in global "
-            "memory (2 bytes/element), all arithmetic in float registers.  "
-            "HBM traffic is halved vs cuda_flash (FP32): K/V reads ≈ 64 MB at "
-            "N=4096 vs 128 MB.  Approaches 2× speedup at large N where the "
-            "kernel is bandwidth-bound.  Shared memory stays float (convert on "
-            "load) — no bank-conflict or layout changes required."
+            "Mixed-precision FlashAttention: Q/K/V/O in __half global memory, "
+            "__half shared memory tiles (s_Q/s_K/s_V), __half2 vectorised dot "
+            "product (32 loads/lane vs 64 for FP32), float register accumulators.  "
+            "Result: 0.68–0.79× of cuda_flash (FP32) — slower despite halved HBM "
+            "traffic.  Root cause: at peak 7.8 TFLOP/s the kernel is compute-bound "
+            "(13% of H100's 60 TFLOP/s FP32 ceiling), far from the HBM roofline "
+            "(3.35 TB/s).  FP16's bandwidth advantage only materialises once the "
+            "kernel saturates memory bandwidth; on CUDA cores with scalar arithmetic "
+            "the conversion overhead outweighs the reduced traffic.  The gap narrows "
+            "at N=8192 (0.79×) as O(N²) K/V traffic begins to push toward the "
+            "memory roof."
         ),
         "next": (
-            "Full Tensor Core path: use WMMA (wmma::load_matrix_sync) for the "
-            "Q·K^T dot product (16×16×16 FP16 mma) to additionally exploit the "
-            "H100's 989 TFLOP/s FP16 Tensor Core throughput.  Requires "
-            "reshaping the tile layout to 16×16 fragments."
+            "Tensor Core path (WMMA): use wmma::load_matrix_sync for the Q·K^T "
+            "dot product (16×16×16 FP16 mma fragments).  H100 FP16 Tensor Core "
+            "peak is ~312 TFLOP/s — a potential 40× over current throughput and "
+            "the only path to FP16 actually beating FP32 on this kernel."
         ),
     },
     ("datamove", "bidirectional"): {
