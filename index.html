@@ -606,7 +606,8 @@
   <nav class="sidebar" aria-label="Section navigation">
     <div class="sidebar-logo"><span>KernelX</span></div>
     <ul class="nav-links" id="nav-links">
-      <li><a href="#overview" class="active">Overview</a></li>
+      <li><a href="#intro" class="active">Introduction</a></li>
+      <li><a href="#overview">Methodology</a></li>
       <li><a href="#gemm">GEMM</a></li>
       <li><a href="#softmax">Softmax</a></li>
       <li><a href="#layernorm">LayerNorm</a></li>
@@ -651,6 +652,90 @@
         <span class="tag">H100</span>
       </div>
     </header>
+
+    <!-- INTRODUCTION -->
+    <section id="intro">
+      <div class="section-label">What Is This?</div>
+      <h2>A Performance Engineering System, Not a Collection of CUDA Programs</h2>
+      <p>
+        KernelX is a <strong style="color: var(--text);">GPU kernel performance engineering platform</strong>. Its job is to take a GPU workload, establish a reproducible performance baseline, profile its execution on real hardware, identify the limiting hardware resource, implement targeted optimized variants, and quantitatively evaluate the result.
+      </p>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 28px 0;">
+        <div style="background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 20px 24px;">
+          <div style="font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); margin-bottom: 10px;">Question 1</div>
+          <div style="font-size: 17px; font-weight: 600; color: var(--text); line-height: 1.4;">Why is this kernel performing the way it is?</div>
+        </div>
+        <div style="background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--blue); border-radius: var(--radius); padding: 20px 24px;">
+          <div style="font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--blue); margin-bottom: 10px;">Question 2</div>
+          <div style="font-size: 17px; font-weight: 600; color: var(--text); line-height: 1.4;">What change actually makes it faster?</div>
+        </div>
+      </div>
+
+      <p>
+        These are the two questions every result in this project is built to answer. Not "what is the fastest number I can get?" but a measurement-grounded explanation of the hardware bottleneck and a targeted fix derived from that explanation.
+      </p>
+
+      <h3 style="margin-top: 36px; margin-bottom: 16px;">The Engineering Problem</h3>
+      <p>
+        Modern AI workloads are increasingly constrained by how efficiently computation moves through GPU hardware — not simply whether the model produces the correct output. The gap between a correct naive implementation and a hardware-efficient one is not a constant factor. It is specific to the kernel, the problem size, and the hardware generation. The only way to close that gap systematically is to measure it, understand it, and act on what the measurement says.
+      </p>
+      <p>
+        NVIDIA's performance engineering roles explicitly involve kernels like attention, matrix multiplication, MoE routing, quantization, and data movement — using CUDA, CUTLASS, and Triton — with repeatable benchmarks, roofline analysis, regression gates, and Nsight tooling. This project is a focused implementation of that workflow on a realistic slice of those workloads, running on NVIDIA H100 hardware.
+      </p>
+
+      <h3 style="margin-top: 36px; margin-bottom: 16px;">The Workflow</h3>
+      <div style="background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 24px; margin-bottom: 24px;">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 0; font-family: var(--font-mono); font-size: 12px;">
+
+          <div style="background: rgba(118,185,0,0.12); border: 1px solid rgba(118,185,0,0.3); color: var(--accent); padding: 8px 24px; border-radius: 6px; font-weight: 600;">Workload</div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 24px; border-radius: 6px;">Baseline Kernel</div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 24px; border-radius: 6px;">Microbenchmark</div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 24px; border-radius: 6px;">Nsight Systems Profile</div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="background: rgba(88,166,255,0.1); border: 1px solid rgba(88,166,255,0.3); color: var(--blue); padding: 8px 24px; border-radius: 6px; font-weight: 600;">Identify Bottleneck + Roofline Position</div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 24px; border-radius: 6px;">Optimization Hypothesis</div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="display: flex; gap: 16px; align-items: center;">
+            <div style="background: var(--bg); border: 1px solid var(--border); color: var(--muted); padding: 8px 20px; border-radius: 6px; text-align: center;">CUDA</div>
+            <div style="background: var(--bg); border: 1px solid var(--border); color: var(--muted); padding: 8px 20px; border-radius: 6px; text-align: center;">CUTLASS</div>
+            <div style="background: var(--bg); border: 1px solid var(--border); color: var(--muted); padding: 8px 20px; border-radius: 6px; text-align: center;">Triton</div>
+          </div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 24px; border-radius: 6px;">Benchmark Again</div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 24px; border-radius: 6px;">Compare to Baseline</div>
+          <div style="color: var(--border); font-size: 18px; line-height: 1.2;">↓</div>
+
+          <div style="background: rgba(118,185,0,0.12); border: 1px solid rgba(118,185,0,0.3); color: var(--accent); padding: 8px 24px; border-radius: 6px; font-weight: 600;">Performance Record</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 36px; margin-bottom: 16px;">Six Workloads, Understood Deeply</h3>
+      <p>
+        The goal is not breadth. The goal is to understand a handful of workloads well enough to explain every number. Each workload covers a different hardware constraint — compute throughput, memory bandwidth, synchronization cost, PCIe transfer — and builds toward the next.
+      </p>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-top: 20px;">
+        <a href="#gemm"   style="text-decoration: none;"><div class="layer-card" style="cursor: pointer; transition: border-color 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'"><div class="layer-num">01</div><div class="layer-title">GEMM</div><div class="layer-desc">Matrix multiplication. The core primitive of deep learning. Naive → Tensor Cores.</div></div></a>
+        <a href="#softmax" style="text-decoration: none;"><div class="layer-card" style="cursor: pointer; transition: border-color 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'"><div class="layer-num">02</div><div class="layer-title">Softmax</div><div class="layer-desc">Row-wise normalization. Synchronization cost vs arithmetic. 300× improvement.</div></div></a>
+        <a href="#layernorm" style="text-decoration: none;"><div class="layer-card" style="cursor: pointer; transition: border-color 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'"><div class="layer-num">03</div><div class="layer-title">LayerNorm</div><div class="layer-desc">Per-row normalization. HBM pass count as the bottleneck. 180× improvement.</div></div></a>
+        <a href="#attention" style="text-decoration: none;"><div class="layer-card" style="cursor: pointer; transition: border-color 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'"><div class="layer-num">04</div><div class="layer-title">Attention</div><div class="layer-desc">Self-attention with FlashAttention. O(N²) → O(N·D) memory traffic. FP16 roofline finding.</div></div></a>
+        <a href="#reduction" style="text-decoration: none;"><div class="layer-card" style="cursor: pointer; transition: border-color 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'"><div class="layer-num">05</div><div class="layer-title">Reduction</div><div class="layer-desc">Parallel sum. Latency vs bandwidth regime transition — when does a sync optimization matter?</div></div></a>
+        <a href="#datamovement" style="text-decoration: none;"><div class="layer-card" style="cursor: pointer; transition: border-color 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'"><div class="layer-num">06</div><div class="layer-title">Data Movement</div><div class="layer-desc">Host↔device PCIe transfer. Pageable vs pinned vs bidirectional. Sometimes the kernel isn't the bottleneck.</div></div></a>
+      </div>
+    </section>
 
     <!-- OVERVIEW -->
     <section id="overview">
