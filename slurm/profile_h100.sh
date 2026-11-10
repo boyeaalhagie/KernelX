@@ -40,7 +40,7 @@ PROFILES_DIR="${REPO_ROOT}/profiles"
 # On ROSIE, ncu does not exist on the host — it lives inside the CUDA/PyTorch
 # container.  Set SIF_IMAGE to the same .sif you used for InferX, or any
 # container built from nvcr.io/nvidia/pytorch:24.xx-py3 (includes full toolkit).
-SIF_IMAGE="${SIF_IMAGE:-/data/ai_club/containers/pytorch_24.08.sif}"
+SIF_IMAGE="${SIF_IMAGE:-/data/containers/msoe-pytorch-25.05-py3.sif}"
 NCU_BIN="/usr/local/bin/ncu"
 
 # Wrapper: run ncu inside the container with GPU passthrough and repo mounted.
