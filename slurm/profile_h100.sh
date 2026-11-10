@@ -135,6 +135,8 @@ profile_kernel() {
     local ncu_tmp
     ncu_tmp="$(mktemp /tmp/ncu_XXXXXX.csv)"
 
+    # || true prevents set -e from killing the script on ncu permission errors
+    # (perf_event_paranoid=4 causes ncu to exit non-zero even with --clock-control none).
     timeout 120s "${NCU[@]}" \
         --metrics "${NCU_METRICS}" \
         --csv --page raw \
@@ -145,11 +147,10 @@ profile_kernel() {
             --dtype "${dtype}" \
             --warmup 0 --iterations 1 \
             --no-verify --no-save \
-    > "${ncu_tmp}" 2>&1
-    local ncu_exit=$?
+    > "${ncu_tmp}" 2>&1 || true
 
     # If no kernel data, retry with --target-processes all
-    if ! grep -q "^\"" "${ncu_tmp}" 2>/dev/null && [ ${ncu_exit} -eq 0 ]; then
+    if ! grep -q "^\"" "${ncu_tmp}" 2>/dev/null; then
         timeout 120s "${NCU[@]}" \
             --metrics "${NCU_METRICS}" \
             --csv --page raw \
