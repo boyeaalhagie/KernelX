@@ -43,15 +43,13 @@ PROFILES_DIR="${REPO_ROOT}/profiles"
 SIF_IMAGE="${SIF_IMAGE:-/data/containers/msoe-pytorch-25.05-py3.sif}"
 NCU_BIN="/usr/local/bin/ncu"
 
-# Wrapper: run ncu inside the container with GPU passthrough and repo mounted.
+# NCU command array — allows timeout to invoke it as an executable.
 # --clock-control none  — skips GPU clock locking, which requires root on HPC.
-ncu() {
-    singularity exec --nv \
-        -B "${REPO_ROOT}:${REPO_ROOT}" \
-        -B /tmp:/tmp \
-        "${SIF_IMAGE}" \
-        "${NCU_BIN}" --clock-control none "$@"
-}
+NCU=(singularity exec --nv
+    -B "${REPO_ROOT}:${REPO_ROOT}"
+    -B /tmp:/tmp
+    "${SIF_IMAGE}"
+    "${NCU_BIN}" --clock-control none)
 
 module load cuda/12.1
 export CUDACXX="$(which nvcc)"
@@ -83,13 +81,13 @@ if [ ! -f "${SIF_IMAGE}" ]; then
 fi
 
 echo "=== ncu version ==="
-ncu --version | head -3
+"${NCU[@]}" --version | head -3
 echo ""
 
 echo "=== ncu capability check ==="
 echo "perf_event_paranoid: $(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo unknown)"
 echo "ncu --query-metrics (10s timeout):"
-timeout 10s ncu --query-metrics 2>&1 | head -3 \
+timeout 10s "${NCU[@]}" --query-metrics 2>&1 | head -3 \
     || echo "  [timed out or failed]"
 echo ""
 
@@ -137,7 +135,7 @@ profile_kernel() {
     local ncu_tmp
     ncu_tmp="$(mktemp /tmp/ncu_XXXXXX.csv)"
 
-    timeout 120s ncu \
+    timeout 120s "${NCU[@]}" \
         --metrics "${NCU_METRICS}" \
         --csv --page raw \
         "${BENCH}" \
@@ -152,7 +150,7 @@ profile_kernel() {
 
     # If no kernel data, retry with --target-processes all
     if ! grep -q "^\"" "${ncu_tmp}" 2>/dev/null && [ ${ncu_exit} -eq 0 ]; then
-        timeout 120s ncu \
+        timeout 120s "${NCU[@]}" \
             --metrics "${NCU_METRICS}" \
             --csv --page raw \
             --target-processes all \
