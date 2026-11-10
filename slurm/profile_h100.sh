@@ -135,10 +135,11 @@ profile_kernel() {
     local ncu_tmp
     ncu_tmp="$(mktemp /tmp/ncu_XXXXXX.csv)"
 
-    # || true prevents set -e from killing the script on ncu permission errors
-    # (perf_event_paranoid=4 causes ncu to exit non-zero even with --clock-control none).
+    # Custom --metrics requires hardware PMU counters (blocked by perf_event_paranoid=4).
+    # Use --set default instead — predefined sections use sampling-based collection
+    # which works without CAP_PERFMON.  || true suppresses non-zero exit on warnings.
     timeout 120s "${NCU[@]}" \
-        --metrics "${NCU_METRICS}" \
+        --set default \
         --csv --page raw \
         "${BENCH}" \
             --workload  "${workload}" \
@@ -152,7 +153,7 @@ profile_kernel() {
     # If no kernel data, retry with --target-processes all
     if ! grep -q "^\"" "${ncu_tmp}" 2>/dev/null; then
         timeout 120s "${NCU[@]}" \
-            --metrics "${NCU_METRICS}" \
+            --set default \
             --csv --page raw \
             --target-processes all \
             "${BENCH}" \
