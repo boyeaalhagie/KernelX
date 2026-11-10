@@ -36,39 +36,32 @@ BENCH="${BUILD_DIR}/bench"
 PARSE="${REPO_ROOT}/scripts/parse_ncu.py"
 PROFILES_DIR="${REPO_ROOT}/profiles"
 
+# Singularity container that includes ncu (/usr/local/bin/ncu).
+# On ROSIE, ncu does not exist on the host — it lives inside the CUDA/PyTorch
+# container.  Set SIF_IMAGE to the same .sif you used for InferX, or any
+# container built from nvcr.io/nvidia/pytorch:24.xx-py3 (includes full toolkit).
+SIF_IMAGE="${SIF_IMAGE:-/data/ai_club/containers/pytorch_24.08.sif}"
+NCU_BIN="/usr/local/bin/ncu"
+
+# Wrapper: run ncu inside the container with GPU passthrough and repo mounted.
+# --clock-control none  — skips GPU clock locking, which requires root on HPC.
+ncu() {
+    singularity exec --nv \
+        -B "${REPO_ROOT}:${REPO_ROOT}" \
+        -B /tmp:/tmp \
+        "${SIF_IMAGE}" \
+        "${NCU_BIN}" --clock-control none "$@"
+}
+
 module load cuda/12.1
 export CUDACXX="$(which nvcc)"
-
-# ncu (Nsight Compute CLI) is part of the full CUDA toolkit installer but is
-# NOT installed as a system package on ROSIE — only nvcc is available via apt.
-# Attempt to find it in common HPC locations before giving up.
-_find_ncu() {
-    # 1. User-local toolkit install (installed via runfile --toolkitpath)
-    [ -x "${HOME}/cuda_local/bin/ncu" ] && { echo "${HOME}/cuda_local/bin/ncu"; return; }
-
-    # 2. Alongside nvcc (standard toolkit layout)
-    local nvcc_dir
-    nvcc_dir="$(dirname "$(which nvcc 2>/dev/null)")"
-    [ -x "${nvcc_dir}/ncu" ] && { echo "${nvcc_dir}/ncu"; return; }
-
-    # 3. CUDA_HOME set by the module
-    [ -x "${CUDA_HOME}/bin/ncu" ] && { echo "${CUDA_HOME}/bin/ncu"; return; }
-
-    # 4. Versioned installations common on cluster shared filesystems
-    for d in /usr/local/cuda/bin /usr/local/cuda-12*/bin /opt/cuda/bin; do
-        [ -x "${d}/ncu" ] && { echo "${d}/ncu"; return; }
-    done
-
-    return 1
-}
-NCU="$(_find_ncu)" || NCU=""
 
 echo "=== Environment ==="
 srun hostname
 GPU_NAME=$(srun nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 echo "GPU: ${GPU_NAME}"
 echo "nvcc: $(which nvcc 2>/dev/null || echo NOT FOUND)"
-echo "ncu:  ${NCU:-NOT FOUND}"
+echo "SIF:  ${SIF_IMAGE}"
 date
 echo ""
 
@@ -82,30 +75,22 @@ make -j"$(nproc)"
 cd "${REPO_ROOT}"
 echo ""
 
-# Verify ncu is available
-if [ -z "${NCU}" ]; then
-    echo "[error] ncu (Nsight Compute CLI) not found on this node."
-    echo "        ncu requires a full CUDA toolkit installation, not just the"
-    echo "        system nvcc package.  On ROSIE, contact sysadmin to install"
-    echo "        cuda-tools-12-1 or run via Singularity with a full CUDA image."
-    echo ""
-    echo "        Diagnostic — nvcc dir contents:"
-    ls "$(dirname "$(which nvcc 2>/dev/null)")" 2>/dev/null | tr '\n' ' '
-    echo ""
+# Verify the container image exists
+if [ ! -f "${SIF_IMAGE}" ]; then
+    echo "[error] Singularity image not found: ${SIF_IMAGE}"
+    echo "        Set SIF_IMAGE=/path/to/your/container.sif and resubmit."
     exit 1
 fi
+
 echo "=== ncu version ==="
-"${NCU}" --version | head -3
+ncu --version | head -3
 echo ""
 
-# Capability check: ncu --target-processes all requires CAP_PERFMON (Linux 5.8+)
-# or perf_event_paranoid <= 2.  HPC clusters typically restrict this.
-# Use timeout to detect hangs; fall back to direct profiling if needed.
 echo "=== ncu capability check ==="
 echo "perf_event_paranoid: $(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo unknown)"
 echo "ncu --query-metrics (10s timeout):"
-timeout 10s "${NCU}" --query-metrics 2>&1 | head -3 \
-    || echo "  [timed out or failed — CAP_PERFMON / perf_event_paranoid restriction likely]"
+timeout 10s ncu --query-metrics 2>&1 | head -3 \
+    || echo "  [timed out or failed]"
 echo ""
 
 mkdir -p "${PROFILES_DIR}"
@@ -152,7 +137,7 @@ profile_kernel() {
     local ncu_tmp
     ncu_tmp="$(mktemp /tmp/ncu_XXXXXX.csv)"
 
-    timeout 120s "${NCU}" \
+    timeout 120s ncu \
         --metrics "${NCU_METRICS}" \
         --csv --page raw \
         "${BENCH}" \
@@ -167,7 +152,7 @@ profile_kernel() {
 
     # If no kernel data, retry with --target-processes all
     if ! grep -q "^\"" "${ncu_tmp}" 2>/dev/null && [ ${ncu_exit} -eq 0 ]; then
-        timeout 120s "${NCU}" \
+        timeout 120s ncu \
             --metrics "${NCU_METRICS}" \
             --csv --page raw \
             --target-processes all \
